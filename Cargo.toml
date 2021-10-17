@@ -1,0 +1,19 @@
+[package]
+name = "substrate-cli"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.44"
+dotenv = "0.15.0"
+env_logger = "0.9.0"
+
+# substrate
+sp-core = "3.0.0"
+sp-keyring = "3.0.0"
+substrate-api-client = "0.6.6"
+
+# rhai
+rhai = { version = "1.1.0", default-features = false, features = ["only_i64", "no_float", "decimal", "serde", "metadata"]}
