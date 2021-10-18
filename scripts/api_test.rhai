@@ -2,27 +2,33 @@
 
 print("Test Client API");
 
-let api = connect("ws://127.0.0.1:9944");
-api.print_metadata();
-
 // Test creating users.
 let user = USER.Alice;
 print(`User: ${user}`);
-let user = USER.Bob;
-print(`User: ${user}`);
 
-let user = USER.User_1;
-print(`User: ${user}`);
+//let api = connect("ws://127.0.0.1:9944");
+let api = user.connect("ws://127.0.0.1:9944");
+//api.print_metadata();
 
-// dynamic users.
-for x in range(0, 4) {
-	let user = USER[`User_${x}`];
-	print(`User[${x}]: ${user}`);
-}
+let pallet = API.Balances;
+print(`pallet: ${pallet}`);
 
-// dynamic users.
-for x in range(0, 4) {
-	let user = USER[`User_${x}`];
-	print(`User[${x}]: ${user}`);
+let storage = pallet.TotalIssuance;
+print(`storage: ${storage}`);
+//print(`storage.title: ${storage.title}`);
+
+let func = pallet.transfer;
+print(`func: ${func}`);
+
+//print(`func.title: ${func.title}`);
+
+//print(`func.docs: ${func.docs}`);
+
+for mod in API.modules {
+	print(`module: ${mod}`);
+	for func in mod.funcs {
+		print(`  ${func}`);
+	}
+	print()
 }
 

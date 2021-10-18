@@ -13,6 +13,7 @@ env_logger = "0.9.0"
 # substrate
 sp-core = "3.0.0"
 sp-keyring = "3.0.0"
+frame-metadata = { version = "13.0.0", default-features = false }
 substrate-api-client = "0.6.6"
 
 # rhai

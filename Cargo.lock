@@ -3350,6 +3350,7 @@ dependencies = [
  "anyhow",
  "dotenv",
  "env_logger",
+ "frame-metadata",
  "rhai",
  "sp-core",
  "sp-keyring",

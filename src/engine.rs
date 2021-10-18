@@ -39,23 +39,18 @@ pub fn init_engine() -> Engine {
   engine.set_optimization_level(OptimizationLevel::Full);
 
   // init modules.
-  let users = Dynamic::from(crate::users::init_engine(&mut engine))
-    .into_shared();
+  let users = crate::users::init_engine(&mut engine);
 
   crate::client::init_engine(&mut engine);
 
-  crate::api::init_engine(&mut engine);
+  let api = crate::api::init_engine("ws://127.0.0.1:9944", &mut engine);
 
   // "Globals"
-  engine.on_var(move |name: &str, _, _| {
-    match name {
-      "USER" => {
-        Ok(Some(users.clone()))
-      }
-      _ => Ok(None)
-    }
+  engine.on_var(move |name: &str, _, _| match name {
+    "USER" => Ok(Some(users.clone())),
+    "API" => Ok(Some(api.clone())),
+    _ => Ok(None),
   });
 
   engine
 }
-
