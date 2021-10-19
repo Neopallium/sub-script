@@ -10,7 +10,7 @@ print(`User: ${user}`);
 let api = user.connect("ws://127.0.0.1:9944");
 //api.print_metadata();
 
-let pallet = API.Balances;
+let pallet = METADATA.Balances;
 print(`pallet: ${pallet}`);
 
 let storage = pallet.TotalIssuance;
@@ -24,7 +24,7 @@ print(`func: ${func}`);
 
 //print(`func.docs: ${func.docs}`);
 
-for mod in API.modules {
+for mod in METADATA.modules {
 	print(`module: ${mod}`);
 	for func in mod.funcs {
 		print(`  ${func}`);

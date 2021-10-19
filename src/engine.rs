@@ -6,6 +6,7 @@ use rhai::OptimizationLevel;
 use crate::{
   users,
   client,
+  metadata,
   api,
 };
 
@@ -48,11 +49,13 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
   // Register types with engine.
   users::init_engine(&mut engine);
   client::init_engine(&mut engine);
+  metadata::init_engine(&mut engine);
   api::init_engine(&mut engine);
 
   // Initialize scope with some globals.
   users::init_scope(&mut scope);
-  api::init_scope(url, &mut scope)?;
+  let md = metadata::init_scope(url, &mut scope)?;
+  api::init_scope(md, &mut scope)?;
 
   Ok((engine, scope))
 }
