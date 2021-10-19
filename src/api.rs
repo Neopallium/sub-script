@@ -5,7 +5,7 @@ use frame_metadata::{
   ModuleMetadata, RuntimeMetadata, RuntimeMetadataPrefixed, StorageEntryMetadata, META_RESERVED,
 };
 
-use rhai::{Dynamic, Engine, EvalAltResult};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 fn decode<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
@@ -288,9 +288,7 @@ impl Docs {
   }
 }
 
-pub fn init_engine(url: &str, engine: &mut Engine) -> Dynamic {
-  let lookup = ApiMetadata::new(url).expect("Failed to load API");
-
+pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<ApiMetadata>("ApiMetadata")
     .register_get("modules", ApiMetadata::modules)
@@ -312,6 +310,11 @@ pub fn init_engine(url: &str, engine: &mut Engine) -> Dynamic {
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
+}
 
-  Dynamic::from(lookup).into_shared()
+pub fn init_scope(url: &str, scope: &mut Scope<'_>) -> Result<(), Box<EvalAltResult>> {
+  let lookup = ApiMetadata::new(url)?;
+  scope.push_constant("API", lookup);
+
+  Ok(())
 }

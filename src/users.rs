@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use sp_core::sr25519;
 use sp_core::Pair;
 
-use rhai::{Dynamic, Engine, EvalAltResult};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 use crate::client::Client;
 
@@ -39,7 +39,7 @@ pub struct Users {
 }
 
 impl Users {
-  fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       users: HashMap::new(),
     }
@@ -58,7 +58,7 @@ impl Users {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) -> Dynamic {
+pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<User>("User")
     .register_result_fn("connect", User::connect)
@@ -67,6 +67,8 @@ pub fn init_engine(engine: &mut Engine) -> Dynamic {
     .register_type_with_name::<Users>("Users")
     .register_fn("new_users", Users::new)
     .register_indexer_get_result(Users::get_user);
+}
 
-  Dynamic::from(Users::new()).into_shared()
+pub fn init_scope(scope: &mut Scope) {
+  scope.push_constant("USER", Users::new());
 }

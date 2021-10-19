@@ -2,8 +2,18 @@ use substrate_cli::engine::*;
 
 use std::{env, fs::File, io::Read, path::Path, process::exit};
 
-fn main() {
+use anyhow::{anyhow, Result};
+
+fn main() -> Result<()> {
+  dotenv::dotenv().ok();
+  env_logger::init();
+
+  let url = "ws://127.0.0.1:9944";
+
   let mut contents = String::new();
+
+  let (engine, mut scope) = init_engine(&url)
+    .map_err(|e| anyhow!("Failed to initial engine: {:?}", e))?;
 
   for filename in env::args().skip(1) {
     let filename = match Path::new(&filename).canonicalize() {
@@ -16,8 +26,6 @@ fn main() {
         _ => f,
       },
     };
-
-    let engine = init_engine();
 
     let mut f = match File::open(&filename) {
       Err(err) => {
@@ -54,7 +62,7 @@ fn main() {
       .map_err(|err| err.into())
       .and_then(|mut ast| {
         ast.set_source(filename.to_string_lossy().to_string());
-        engine.run_ast(&ast)
+        engine.run_ast_with_scope(&mut scope, &ast)
       })
     {
       let filename = filename.to_string_lossy();
@@ -67,4 +75,6 @@ fn main() {
       eprint_error(contents, *err);
     }
   }
+
+  Ok(())
 }

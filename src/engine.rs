@@ -1,7 +1,13 @@
-pub use rhai::{Dynamic, Engine, EvalAltResult, Position};
+pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 
 #[cfg(not(feature = "no_optimize"))]
 use rhai::OptimizationLevel;
+
+use crate::{
+  users,
+  client,
+  api,
+};
 
 pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   fn eprint_line(lines: &[&str], pos: Position, err_msg: &str) {
@@ -32,25 +38,21 @@ pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   }
 }
 
-pub fn init_engine() -> Engine {
+pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltResult>> {
   let mut engine = Engine::new();
+  let mut scope = Scope::new();
 
   #[cfg(not(feature = "no_optimize"))]
   engine.set_optimization_level(OptimizationLevel::Full);
 
-  // init modules.
-  let users = crate::users::init_engine(&mut engine);
+  // Register types with engine.
+  users::init_engine(&mut engine);
+  client::init_engine(&mut engine);
+  api::init_engine(&mut engine);
 
-  crate::client::init_engine(&mut engine);
+  // Initialize scope with some globals.
+  users::init_scope(&mut scope);
+  api::init_scope(url, &mut scope)?;
 
-  let api = crate::api::init_engine("ws://127.0.0.1:9944", &mut engine);
-
-  // "Globals"
-  engine.on_var(move |name: &str, _, _| match name {
-    "USER" => Ok(Some(users.clone())),
-    "API" => Ok(Some(api.clone())),
-    _ => Ok(None),
-  });
-
-  engine
+  Ok((engine, scope))
 }
