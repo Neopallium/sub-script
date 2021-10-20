@@ -6,6 +6,7 @@ use rhai::OptimizationLevel;
 use crate::{
   users,
   client,
+  types,
   metadata,
   api,
 };
@@ -40,6 +41,8 @@ pub fn eprint_error(input: &str, mut err: EvalAltResult) {
 }
 
 pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltResult>> {
+  let schema = "schema.json";
+
   let mut engine = Engine::new();
   let mut scope = Scope::new();
 
@@ -49,11 +52,13 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
   // Register types with engine.
   users::init_engine(&mut engine);
   client::init_engine(&mut engine);
+  types::init_engine(&mut engine);
   metadata::init_engine(&mut engine);
   api::init_engine(&mut engine);
 
   // Initialize scope with some globals.
   users::init_scope(&mut scope);
+  let _lookup = types::init_scope(&schema, &mut scope);
   let md = metadata::init_scope(url, &mut scope)?;
   api::init_scope(md, &mut scope)?;
 
