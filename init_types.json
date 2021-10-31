@@ -1,0 +1,169 @@
+{
+  "Balance": "u128",
+  "BalanceOf<T>": "Balance",
+  "BlockNumber": "u32",
+  "schedule::Period<BlockNumber>": "(BlockNumber, u32)",
+  "schedule::Priority": "u8",
+  "AccountId": "[u8; 32]",
+  "AccountIndex": "u32",
+  "Weight": "u64",
+  "Percent": "u8",
+  "PerU16": "u16",
+  "Permill": "u32",
+  "Perbill": "u32",
+  "H256": "[u8; 32]",
+  "H512": "[u8; 64]",
+  "Hash": "H256",
+  "MultiAddress": {
+    "_enum": {
+      "Id": "AccountId",
+      "Index": "AccountIndex",
+      "Raw": "Vec<u8>",
+      "Address32": "[u8; 32]",
+      "Address20": "[u8; 20]"
+    }
+  },
+  "DispatchErrorModule": {
+    "index": "u8",
+    "error": "u8",
+    "message": "Option<Text>"
+  },
+  "TokenError": {
+    "_enum": ["NoFunds", "WouldDie", "BelowMinimum", "CannotCreate", "UnknownAsset", "Frozen", "Unsupported"]
+  },
+   "ArithmeticError": {
+    "_enum": ["Underflow", "Overflow", "DivisionByZero"]
+  },
+  "DispatchError": {
+    "_enum": {
+      "Other": "Text",
+      "CannotLookup": "",
+      "BadOrigin": "",
+      "Module": "DispatchErrorModule",
+      "ConsumerRemaining": "",
+      "NoProviders": "",
+      "Token": "TokenError",
+      "Arithmetic": "ArithmeticError"
+    }
+  },
+  "SessionIndex": "u32",
+  "AuthIndex": "u32",
+  "OpaquePeerId": "Vec<u8>",
+  "OpaqueMultiaddr": "Vec<u8>",
+  "OpaqueNetworkState": {
+    "peer_id": "OpaquePeerId",
+    "external_addresses": "Vec<OpaqueMultiaddr>"
+  },
+  "Heartbeat<BlockNumber>": {
+    "block_number": "BlockNumber",
+    "network_state": "OpaqueNetworkState",
+    "session_index": "SessionIndex",
+    "authoriy_index": "AuthIndex",
+    "validators_len": "u32"
+  },
+  "ConsensusEngineId": "[u8; 4]",
+  "ChangesTrieConfiguration": {
+    "digest_interval": "u32",
+    "digest_levels": "u32"
+  },
+  "ChangesTrieSignal": {
+    "_enum": {
+      "NewConfiguration": "Option<ChangesTrieConfiguration>"
+    }
+  },
+  "DigestItem<Hash>": {
+    "_enum": {
+      "ChangesTrieRoot": "Hash",
+      "PreRuntime": "(ConsensusEngineId, Vec<u8>)",
+      "Consesnsus": "(ConsensusEngineId, Vec<u8>)",
+      "Seal": "(ConsensusEngineId, Vec<u8>)",
+      "ChangesTrieSignal": "ChangesTrieSignal",
+      "Other": "Vec<u8>"
+    }
+  },
+  "Digest<Hash>": {
+    "logs": "Vec<DigestItem<Hash>>"
+  },
+  "Header": {
+    "parent_hash": "Hash",
+    "number": "BlockNumber",
+    "state_root": "Hash",
+    "extrinsics_root": "Hash",
+    "digest": "Digest<Hash>"
+  },
+  "Slot": "u64",
+  "EquivocationProof<Hash, BlockNumber>": {
+    "offender": "BlockNumber",
+    "slot": "Slot",
+    "first_header": "Hash",
+    "second_header": "Hash"
+  },
+  "EquivocationProof<Header>": {
+    "offender": "BlockNumber",
+    "slot": "Slot",
+    "first_header": "Header",
+    "second_header": "Header"
+  },
+  "RewardDestination<AccountId>": {
+    "_enum": {
+      "Staked": "",
+      "Stash": "",
+      "Controller": "",
+      "Account": "AccountId",
+      "None": ""
+    }
+  },
+  "Key": "Vec<u8>",
+  "KeyValue": "(Vec<u8>, Vec<u8>)",
+  "KeyOwnerProof": "MembershipProof",
+  "EraIndex": "u32",
+  "MemberCount": "u32",
+  "ValidatorIndex": "u32",
+  "ValidatorCount": "u32",
+  "NominatorIndex": "u32",
+  "MembershipProof": {
+    "session": "SessionIndex",
+    "trie_nodes": "Vec<Vec<u8>>",
+    "validator_count": "ValidatorCount"
+  },
+  "<Lookup as StaticLookup>::Source": "LookupSource",
+  "ElectionSize": {
+    "validators": "Compact<ValidatorIndex>",
+    "nominators": "Compact<NominatorIndex>"
+  },
+	"ValidatorPrefs": {
+		"commission": "Perbill",
+		"blocked": "bool"
+	},
+	"ExtendedBalance": "u128",
+	"ElectionScore": "[ExtendedBalance; 3]",
+  "Keys": "SessionKeys",
+  "Proposal": "Call",
+  "ProposalIndex": "u32",
+	"Index": "u32",
+	"RefCount": "u32",
+	"AccountData": {
+		"free": "Balance",
+		"reserved": "Balance",
+		"misc_frozen": "Balance",
+		"fee_frozen": "Balance"
+	},
+	"AccountInfoWithDualRefCount": {
+		"nonce": "Index",
+		"consumers": "RefCount",
+		"providers": "RefCount",
+		"sufficients": "RefCount",
+		"data": "AccountData"
+	},
+	"MultiSignature": {
+		"_enum": {
+			"Ed25519": "[u8; 64]",
+			"Sr25519": "[u8; 64]",
+			"Ecdsa": "[u8; 65]"
+		}
+	},
+	"Signature": "MultiSignature",
+  "<AuthorityId as RuntimeAppPublic>::Signature": "Signature",
+  "<T as Config>::Call": "Call",
+  "<T as frame_system::Config>::Call": "Call"
+}

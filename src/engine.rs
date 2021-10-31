@@ -58,8 +58,8 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
 
   // Initialize scope with some globals.
   users::init_scope(&mut scope);
-  let _lookup = types::init_scope(&schema, &mut scope);
-  let md = metadata::init_scope(url, &mut scope)?;
+  let lookup = types::init_scope(&schema, &mut scope)?;
+  let md = metadata::init_scope(url, &lookup, &mut scope)?;
   api::init_scope(md, &mut scope)?;
 
   Ok((engine, scope))

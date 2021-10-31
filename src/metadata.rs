@@ -8,6 +8,8 @@ use frame_metadata::{
 
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
+use super::types::{TypeLookup, TypeRef};
+
 fn decode<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
 ) -> Result<&O, Box<EvalAltResult>> {
@@ -24,18 +26,19 @@ pub struct Metadata {
 }
 
 impl Metadata {
-  pub fn new(url: &str) -> Result<Self, Box<EvalAltResult>> {
+  pub fn new(url: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let client = crate::client::Client::connect(url)?;
 
     // Get runtime metadata.
     let metadata_prefixed = client.get_metadata()?;
 
-    Self::decode(url, metadata_prefixed)
+    Self::decode(url, metadata_prefixed, lookup)
   }
 
   pub fn decode(
     url: &str,
     metadata_prefixed: RuntimeMetadataPrefixed,
+    lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     if metadata_prefixed.0 != META_RESERVED {
       return Err(format!("Invalid metadata prefix {}", metadata_prefixed.0).into());
@@ -58,7 +61,7 @@ impl Metadata {
     decode(&md.modules)?
       .iter()
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
-        let m = ModuleMetadata::decode(m)?;
+        let m = ModuleMetadata::decode(m, lookup)?;
         let name = m.name.clone();
         api_md.modules.insert(name, m);
         Ok(())
@@ -91,7 +94,7 @@ pub struct ModuleMetadata {
 }
 
 impl ModuleMetadata {
-  fn decode(md: &frame_metadata::ModuleMetadata) -> Result<Self, Box<EvalAltResult>> {
+  fn decode(md: &frame_metadata::ModuleMetadata, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let mod_idx = md.index;
     let mod_name = decode(&md.name)?;
     let mut module = Self {
@@ -106,7 +109,7 @@ impl ModuleMetadata {
     if let Some(calls) = &md.calls {
       decode(calls)?.iter().enumerate().try_for_each(
         |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let func = FuncMetadata::decode(&mod_name, mod_idx, func_idx as u8, md)?;
+          let func = FuncMetadata::decode(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
           let name = func.name.clone();
           module.funcs.insert(name, func);
           Ok(())
@@ -202,6 +205,7 @@ impl FuncMetadata {
     mod_idx: u8,
     func_idx: u8,
     md: &FunctionMetadata,
+    lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let mut func = Self {
       mod_name: mod_name.into(),
@@ -216,12 +220,17 @@ impl FuncMetadata {
     decode(&md.arguments)?
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-        let arg = ArgMetadata::decode(md)?;
+        let arg = ArgMetadata::decode(md, lookup)?;
         func.args.push(arg);
         Ok(())
       })?;
 
     Ok(func)
+  }
+
+  fn args(&mut self) -> Dynamic {
+    let args: Vec<Dynamic> = self.args.iter().map(|arg| Dynamic::from(arg.clone())).collect();
+    Dynamic::from(args)
   }
 
   fn title(&mut self) -> String {
@@ -247,20 +256,36 @@ impl FuncMetadata {
 pub struct ArgMetadata {
   name: String,
   ty: String,
+  ty_meta: TypeRef,
 }
 
 impl ArgMetadata {
-  fn decode(md: &FunctionArgumentMetadata) -> Result<Self, Box<EvalAltResult>> {
+  fn decode(md: &FunctionArgumentMetadata, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
+    let ty = decode(&md.ty)?.clone();
+    let ty_meta = lookup.parse_type(&ty)?;
     let arg = Self {
       name: decode(&md.name)?.clone(),
-      ty: decode(&md.ty)?.clone(),
+      ty: ty.clone(),
+      ty_meta,
     };
 
     Ok(arg)
   }
 
+  fn get_name(&mut self) -> String {
+    self.name.clone()
+  }
+
+  fn get_type(&mut self) -> String {
+    self.ty.clone()
+  }
+
+  fn get_meta(&mut self) -> TypeRef {
+    self.ty_meta.clone()
+  }
+
   fn to_string(&mut self) -> String {
-    format!("{}: {}", self.name, self.ty)
+    format!("{}: {:?}", self.name, self.ty_meta)
   }
 }
 
@@ -304,17 +329,21 @@ pub fn init_engine(engine: &mut Engine) {
     .register_get("docs", StorageMetadata::docs)
     .register_type_with_name::<FuncMetadata>("FuncMetadata")
     .register_fn("to_string", FuncMetadata::to_string)
+    .register_get("args", FuncMetadata::args)
     .register_get("title", FuncMetadata::title)
     .register_get("docs", FuncMetadata::docs)
     .register_type_with_name::<ArgMetadata>("ArgMetadata")
     .register_fn("to_string", ArgMetadata::to_string)
+    .register_fn("name", ArgMetadata::get_name)
+    .register_fn("type", ArgMetadata::get_type)
+    .register_fn("meta", ArgMetadata::get_meta)
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
 }
 
-pub fn init_scope(url: &str, scope: &mut Scope<'_>) -> Result<Metadata, Box<EvalAltResult>> {
-  let lookup = Metadata::new(url)?;
+pub fn init_scope(url: &str, lookup: &TypeLookup, scope: &mut Scope<'_>) -> Result<Metadata, Box<EvalAltResult>> {
+  let lookup = Metadata::new(url, lookup)?;
   scope.push_constant("METADATA", lookup.clone());
 
   Ok(lookup)

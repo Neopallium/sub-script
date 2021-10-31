@@ -1,5 +1,5 @@
 #!/bin/bash
 #
 
-cargo watch --no-gitignore -w ./scripts/ -w ./utils/.trip/ -s "./target/debug/run $*"
+cargo watch --no-gitignore -w init_types.json -w ./scripts/ -w ./utils/.trip/ -s "./target/debug/run $*"
 
