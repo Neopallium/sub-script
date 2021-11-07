@@ -1,13 +1,16 @@
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 use frame_metadata::{
   DecodeDifferent, DecodeDifferentArray,
   FunctionArgumentMetadata, FunctionMetadata,
   RuntimeMetadata, RuntimeMetadataPrefixed, META_RESERVED,
 };
+use parity_scale_codec::{Encode, Output};
 
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, Scope};
 
+use super::users::User;
 use super::types::{TypeLookup, TypeRef};
 
 fn decode<B: 'static, O: 'static>(
@@ -189,6 +192,83 @@ impl StorageMetadata {
   }
 }
 
+#[derive(Clone, Encode)]
+pub struct EncodedCall(u8, u8, EncodedArgs);
+
+impl EncodedCall {
+  pub fn len(&mut self) -> i64 {
+    2 + self.2.len()
+  }
+
+  fn to_string(&mut self) -> String {
+    let encoded = self.encode();
+    format!("0x{}", hex::encode(&encoded))
+  }
+
+  pub fn into_call(self) -> (u8, u8, EncodedArgs) {
+    (self.0, self.1, self.2)
+  }
+}
+
+#[derive(Clone)]
+pub struct EncodedArgs(pub Vec<u8>);
+
+impl EncodedArgs {
+  pub fn new() -> Self {
+    Self(Vec::with_capacity(256))
+  }
+
+  pub fn encode_value(&mut self, value: Dynamic) -> Result<(), EvalAltResult> {
+    if let Some(user) = value.try_cast::<User>() {
+      user.public().encode_to(&mut self.0);
+    }
+    Ok(())
+  }
+
+  pub fn encode_params(&mut self, params: Dynamic) -> Result<(), EvalAltResult> {
+    if params.is::<Array>() {
+      for param in params.cast::<Array>().into_iter() {
+        self.encode_value(param)?;
+      }
+      Ok(())
+    } else {
+      self.encode_value(params)
+    }
+  }
+
+  pub fn len(&mut self) -> i64 {
+    self.0.len() as i64
+  }
+
+  fn to_string(&mut self) -> String {
+    format!("0x{}", hex::encode(&self.0))
+  }
+}
+
+impl Encode for EncodedArgs {
+  fn size_hint(&self) -> usize {
+    self.0.len()
+  }
+
+  fn encode_to<T: Output + ?Sized>(&self, dest: &mut T) {
+    dest.write(&self.0)
+  }
+}
+
+impl Deref for EncodedArgs {
+  type Target = Vec<u8>;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl DerefMut for EncodedArgs {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    &mut self.0
+  }
+}
+
 #[derive(Clone)]
 pub struct FuncMetadata {
   mod_name: String,
@@ -239,6 +319,13 @@ impl FuncMetadata {
 
   fn docs(&mut self) -> String {
     self.docs.to_string()
+  }
+
+  fn encode_call(&mut self, params: Dynamic) -> Result<EncodedCall, Box<EvalAltResult>> {
+    eprintln!("encode_call: params = {:?}", params);
+    let mut data = EncodedArgs::new();
+    data.encode_params(params)?;
+    Ok(EncodedCall(self.mod_idx, self.func_idx, data))
   }
 
   fn to_string(&mut self) -> String {
@@ -332,11 +419,18 @@ pub fn init_engine(engine: &mut Engine) {
     .register_get("args", FuncMetadata::args)
     .register_get("title", FuncMetadata::title)
     .register_get("docs", FuncMetadata::docs)
+    .register_result_fn("encode_call", FuncMetadata::encode_call)
     .register_type_with_name::<ArgMetadata>("ArgMetadata")
     .register_fn("to_string", ArgMetadata::to_string)
     .register_fn("name", ArgMetadata::get_name)
     .register_fn("type", ArgMetadata::get_type)
     .register_fn("meta", ArgMetadata::get_meta)
+    .register_type_with_name::<EncodedArgs>("EncodedArgs")
+    .register_fn("len", EncodedArgs::len)
+    .register_fn("to_string", EncodedArgs::to_string)
+    .register_type_with_name::<EncodedCall>("EncodedCall")
+    .register_fn("len", EncodedCall::len)
+    .register_fn("to_string", EncodedCall::to_string)
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);

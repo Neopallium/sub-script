@@ -3352,11 +3352,14 @@ dependencies = [
  "dotenv",
  "env_logger",
  "frame-metadata",
+ "hex",
  "indexmap",
+ "parity-scale-codec",
  "rhai",
  "serde_json",
  "sp-core",
  "sp-keyring",
+ "sp-runtime",
  "substrate-api-client",
 ]
 

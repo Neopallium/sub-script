@@ -28,8 +28,29 @@ impl User {
     Client::connect_with_signer(self.pair.clone(), url)
   }
 
+  pub fn public(&self) -> sr25519::Public {
+    self.pair.public()
+  }
+
+  pub fn acc(&mut self) -> Account {
+    Account(self.public())
+  }
+
+  fn seed(&mut self) -> String {
+    hex::encode(&self.pair.to_raw_vec())
+  }
+
   fn to_string(&mut self) -> String {
     self.name.clone()
+  }
+}
+
+#[derive(Clone)]
+pub struct Account(pub sr25519::Public);
+
+impl Account {
+  pub fn to_string(&mut self) -> String {
+    hex::encode(&self.0)
   }
 }
 
@@ -61,9 +82,13 @@ impl Users {
 pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<User>("User")
+    .register_get("acc", User::acc)
+    .register_get("seed", User::seed)
     .register_result_fn("connect", User::connect)
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
+    .register_type_with_name::<Account>("Account")
+    .register_fn("to_string", Account::to_string)
     .register_type_with_name::<Users>("Users")
     .register_fn("new_users", Users::new)
     .register_indexer_get_result(Users::get_user);

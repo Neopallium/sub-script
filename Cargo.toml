@@ -13,10 +13,13 @@ env_logger = "0.9.0"
 # substrate
 sp-core = "3.0.0"
 sp-keyring = "3.0.0"
+sp-runtime = "3.0.0"
 frame-metadata = { version = "13.0.0", default-features = false }
 substrate-api-client = "0.6.6"
+parity-scale-codec = "2.3.1"
 
 # rhai
 rhai = { version = "1.1.0", default-features = false, features = ["only_i64", "no_float", "decimal", "serde", "metadata"]}
 indexmap = "1.7.0"
 serde_json = { version = "1.0.68", features = ["preserve_order"] }
+hex = "0.4.3"
