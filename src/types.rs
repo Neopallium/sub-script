@@ -657,6 +657,11 @@ impl TypeLookup {
     Ok(t.resolve(name)?)
   }
 
+  pub fn insert_meta(&self, name: &str, type_meta: TypeMeta) -> TypeRef {
+    let mut t = self.types.write().unwrap();
+    t.insert_meta(name, type_meta)
+  }
+
   pub fn insert(&self, name: &str, type_def: TypeRef) -> TypeRef {
     let mut t = self.types.write().unwrap();
     t.insert(name, type_def)

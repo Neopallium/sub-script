@@ -13,7 +13,9 @@ use parity_scale_codec::{Encode, Output};
 use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope};
 use rhai::plugin::NativeCallContext;
 
-use super::types::{TypeLookup, TypeRef};
+use indexmap::map::IndexMap;
+
+use super::types::{TypeLookup, TypeRef, TypeMeta};
 
 fn decode<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
@@ -59,15 +61,24 @@ impl Metadata {
       modules: HashMap::new(),
     };
 
+    // Top-level event type.
+    let mut mod_events = IndexMap::new();
+
     // Decode module metadata.
     decode(&md.modules)?
       .iter()
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
         let m = ModuleMetadata::decode(m, lookup)?;
         let name = m.name.clone();
+        if let Some(event_ref) = &m.event_ref {
+          mod_events.insert(name.clone(), Some(event_ref.clone()));
+        }
         api_md.modules.insert(name, m);
         Ok(())
       })?;
+
+    let raw_event_ref = lookup.insert_meta("RawEvent", TypeMeta::Enum(mod_events));
+    lookup.insert("Event", raw_event_ref);
 
     Ok(api_md)
   }
@@ -103,6 +114,7 @@ pub struct ModuleMetadata {
   storage: HashMap<String, StorageMetadata>,
   funcs: HashMap<String, FuncMetadata>,
   events: HashMap<String, EventMetadata>,
+  event_ref: Option<TypeRef>,
 }
 
 impl ModuleMetadata {
@@ -116,6 +128,7 @@ impl ModuleMetadata {
       storage: HashMap::new(),
       funcs: HashMap::new(),
       events: HashMap::new(),
+      event_ref: None,
     };
 
     // Decode module functions.
@@ -147,14 +160,19 @@ impl ModuleMetadata {
 
     // Decode module events.
     if let Some(events) = &md.event {
+      // Module RawEvent type.
+      let mut raw_events = IndexMap::new();
+
       decode(events)?.iter().enumerate().try_for_each(
         |(event_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let event = EventMetadata::decode(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
+          let (event, ty_ref) = EventMetadata::decode(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
           let name = event.name.clone();
+          raw_events.insert(name.clone(), ty_ref);
           module.events.insert(name, event);
           Ok(())
         },
       )?;
+      module.event_ref = Some(lookup.insert_meta(&format!("{}::RawEvent", mod_name), TypeMeta::Enum(raw_events)));
     }
 
     Ok(module)
@@ -315,7 +333,7 @@ impl EventMetadata {
     event_idx: u8,
     md: &frame_metadata::EventMetadata,
     lookup: &TypeLookup,
-  ) -> Result<Self, Box<EvalAltResult>> {
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut event = Self {
       mod_name: mod_name.into(),
       name: decode(&md.name)?.clone(),
@@ -325,16 +343,26 @@ impl EventMetadata {
       docs: Docs::decode(&md.documentation)?,
     };
 
+    let mut event_tuple = Vec::new();
+
     // Decode event arguments.
     decode(&md.arguments)?
       .iter()
       .try_for_each(|name| -> Result<(), Box<EvalAltResult>> {
         let arg = NamedType::new(name, lookup)?;
+        event_tuple.push(arg.ty_meta.clone());
         event.args.push(arg);
         Ok(())
       })?;
 
-    Ok(event)
+    let event_ref = if event_tuple.len() > 0 {
+      let type_name = format!("{}::RawEvent::{}", mod_name, event.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(event_tuple)))
+    } else {
+      None
+    };
+
+    Ok((event, event_ref))
   }
 
   fn args(&mut self) -> Dynamic {
