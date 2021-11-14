@@ -6,7 +6,6 @@ print("Test Client API");
 let user = USER.Alice;
 print(`User: ${user}`);
 
-//let api = connect("ws://127.0.0.1:9944");
 let api = user.connect("ws://127.0.0.1:9944");
 //api.print_metadata();
 
@@ -27,13 +26,43 @@ print(`func: ${func}`);
 //print(`func.docs: ${func.docs}`);
 
 /*
+let max_args = 0;
 for mod in METADATA.modules {
-	print(`module: ${mod}`);
 	for func in mod.funcs {
+		let args = func.args.len();
+		if args > max_args {
+			max_args = args;
+		}
+		if args > 5 {
+			print(`  ${func}`);
+			print(`args = ${args}`);
+		}
+		/*
 		print(`  ${func}`);
 		for arg in func.args {
 			print(` -- ${arg}`);
 		}
+		*/
+	}
+}
+print(`max_args = ${max_args}`);
+// */
+
+/*
+for mod in METADATA.modules {
+	print(`${mod}`);
+	for event in mod.events {
+		print(`  ${event}`);
+	}
+	print()
+}
+// */
+
+/*
+for mod in METADATA.modules {
+	print(`${mod}`);
+	for storage in mod.storage {
+		print(`  ${storage}`);
 	}
 	print()
 }
@@ -50,7 +79,7 @@ for arg in func.args {
 // */
 
 //Types.dump_types();
-//Types.dump_unresolved();
+Types.dump_unresolved();
 
 /*
 let res = Types.parse_type("Option<Moment>");
@@ -60,6 +89,7 @@ let res = Types.parse_type("T::AccountId");
 print(`type: ${res}`);
 */
 
+/*
 let func = METADATA.TestUtils.mock_cdd_register_did;
 print(`mock_cdd: ${func}, ${func.args.len()}`);
 for arg in func.args {
@@ -69,4 +99,8 @@ for arg in func.args {
 }
 let encoded = func.encode_call([user]);
 print(`mock_cdd.encoded: ${encoded}, len: ${encoded.len()}`);
+// */
+
+let ty = Types.resolve("Call");
+print(`Call: ${ty}`);
 

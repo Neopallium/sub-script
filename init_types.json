@@ -1,9 +1,23 @@
 {
+	"polymesh_primitives::Balance": "Balance",
+
   "Balance": "u128",
   "BalanceOf<T>": "Balance",
   "BlockNumber": "u32",
+  "BLockNumber": "BlockNumber",
+	"TaskAddress<BlockNumber>": "(BLockNumber, u32)",
   "schedule::Period<BlockNumber>": "(BlockNumber, u32)",
   "schedule::Priority": "u8",
+	"Scheduled<<T as Config>::Call, BlockNumber, PalletsOrigin, AccountId>": {
+		"maybe_id": "Option<Vec<u8>>",
+		"priority": "schedule::Priority",
+		"call": "Call",
+		"maybe_periodic": "Option<schedule::Period<BlockNumber>>",
+		"origin": "PalletsOrigin"
+	},
+	"Releases": {
+		"_enum": ["V1", "V2"]
+	},
   "AccountId": "[u8; 32]",
   "AccountIndex": "u32",
   "Weight": "u64",
@@ -31,7 +45,7 @@
   "TokenError": {
     "_enum": ["NoFunds", "WouldDie", "BelowMinimum", "CannotCreate", "UnknownAsset", "Frozen", "Unsupported"]
   },
-   "ArithmeticError": {
+  "ArithmeticError": {
     "_enum": ["Underflow", "Overflow", "DivisionByZero"]
   },
   "DispatchError": {
@@ -46,6 +60,18 @@
       "Arithmetic": "ArithmeticError"
     }
   },
+  "DispatchClass": {
+    "_enum": ["Normal", "Operational", "Mandatory"]
+  },
+  "Pays": {
+    "_enum": ["Yes", "No"]
+  },
+  "DispatchInfo": {
+		"weight": "Weight",
+		"class": "DispatchClass",
+		"pays_fee": "Pays"
+  },
+  "DispatchResult": "Result<(), DispatchError>",
   "SessionIndex": "u32",
   "AuthIndex": "u32",
   "OpaquePeerId": "Vec<u8>",
@@ -84,6 +110,14 @@
   "Digest<Hash>": {
     "logs": "Vec<DigestItem<Hash>>"
   },
+  "DigestOf<T>": "Digest<Hash>",
+  "ReportIdOf<T>": "Hash",
+	"EventIndex": "u32",
+	"EventRecord<Event, Hash>": {
+		"phase": "Phase",
+		"event": "Event",
+		"topics": "Vec<Hash>"
+	},
   "Header": {
     "parent_hash": "Hash",
     "number": "BlockNumber",
@@ -113,11 +147,29 @@
       "None": ""
     }
   },
+	"FixedI64": "i64",
+	"FixedI128": "i128",
+	"FixedU128": "u128",
+	"Multiplier": "FixedU128",
+	"SetId": "u64",
+	"KeyTypeId": "[u8; 4]",
+	"Forcing": {
+		"_enum": ["NotForcing", "ForceNew", "ForceNone", "ForceAlways"]
+	},
+	"Phase": {
+		"_enum": {
+			"ApplyExtrinsic": "u32",
+			"Finalization": "",
+			"Initialization": ""
+		}
+	},
+	"Kind": "[u8; 16]",
   "Key": "Vec<u8>",
   "KeyValue": "(Vec<u8>, Vec<u8>)",
   "KeyOwnerProof": "MembershipProof",
   "EraIndex": "u32",
   "MemberCount": "u32",
+  "ValidatorId": "AccountId",
   "ValidatorIndex": "u32",
   "ValidatorCount": "u32",
   "NominatorIndex": "u32",
@@ -148,6 +200,23 @@
 		"misc_frozen": "Balance",
 		"fee_frozen": "Balance"
 	},
+	"LockIdentifier": "[u8; 8]",
+	"BalanceLock<Balance>": {
+		"id": "LockIdentifier",
+		"amount": "Balance",
+		"reasons": "Reasons"
+	},
+	"Reasons": {
+		"_enum": ["Fee", "Misc", "All"]
+	},
+	"RawOrigin<AccountId>": {
+		"_enum": {
+			"Root": "",
+			"Signed": "AccountId",
+			"None": ""
+		}
+	},
+	"PalletsOrigin": "RawOrigin<AccountId>",
 	"AccountInfoWithDualRefCount": {
 		"nonce": "Index",
 		"consumers": "RefCount",

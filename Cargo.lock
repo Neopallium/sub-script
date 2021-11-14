@@ -2500,9 +2500,9 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.1.0"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0a6abd5b3f1fe29984451102a69c79e65212f6c70015a68245a43a8ecc2a88b"
+checksum = "0b9394df571d413a865159d9e73df2e16e270c112bddc15538944c076469760a"
 dependencies = [
  "ahash 0.7.4",
  "instant",
@@ -2549,6 +2549,7 @@ checksum = "e0f1028de22e436bb35fce070310ee57d57b5e59ae77b4e3f24ce4773312b813"
 dependencies = [
  "arrayvec 0.5.2",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -3356,7 +3357,9 @@ dependencies = [
  "indexmap",
  "parity-scale-codec",
  "rhai",
+ "rust_decimal",
  "serde_json",
+ "smartstring",
  "sp-core",
  "sp-keyring",
  "sp-runtime",
