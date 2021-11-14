@@ -6,11 +6,13 @@ use sp_core::Pair;
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 use crate::client::Client;
+use super::metadata::EncodedCall;
 
 #[derive(Clone)]
 pub struct User {
   name: String,
   pair: sr25519::Pair,
+  client: Option<Client>,
 }
 
 impl User {
@@ -21,11 +23,22 @@ impl User {
     Ok(Self {
       name: name.into(),
       pair,
+      client: None,
     })
   }
 
   pub fn connect(&mut self, url: &str) -> Result<Client, Box<EvalAltResult>> {
-    Client::connect_with_signer(self.pair.clone(), url)
+    if let Some(client) = &self.client {
+      if client.check_url(url) {
+        // Same url, just clone the client.
+        return Ok(client.clone());
+      }
+    }
+    let client = Client::connect_with_signer(self.pair.clone(), url)?;
+    if self.client.is_none() {
+      self.client = Some(client.clone())
+    }
+    Ok(client)
   }
 
   pub fn public(&self) -> sr25519::Public {
@@ -38,6 +51,22 @@ impl User {
 
   fn seed(&mut self) -> String {
     hex::encode(&self.pair.to_raw_vec())
+  }
+
+  fn get_or_connect(&mut self) -> Result<&mut Client, Box<EvalAltResult>> {
+    if self.client.is_none() {
+      self.connect("ws://127.0.0.1:9944")?;
+    }
+
+    if let Some(client) = &mut self.client {
+      Ok(client)
+    } else {
+      Err(format!("Failed to connect client."))?
+    }
+  }
+
+  pub fn submit_call(&mut self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+    self.get_or_connect()?.submit_call(call)
   }
 
   fn to_string(&mut self) -> String {
@@ -87,6 +116,8 @@ pub fn init_engine(engine: &mut Engine) {
     .register_result_fn("connect", User::connect)
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
+    .register_result_fn("submit_call", User::submit_call)
+
     .register_type_with_name::<Account>("Account")
     .register_fn("to_string", Account::to_string)
     .register_type_with_name::<Users>("Users")
