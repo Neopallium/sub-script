@@ -10,7 +10,7 @@ use frame_metadata::{
 };
 use parity_scale_codec::{Encode, Output};
 
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope};
 use rhai::plugin::NativeCallContext;
 
 use super::types::{TypeLookup, TypeRef};
@@ -70,6 +70,15 @@ impl Metadata {
       })?;
 
     Ok(api_md)
+  }
+
+  pub fn add_encode_calls(&self, engine: &mut Engine, scope: &mut Scope<'_>) -> Result<(), Box<EvalAltResult>> {
+    // Register each module as a global constant.
+    for (_, module) in &self.modules {
+      module.add_encode_calls(engine, scope)?;
+    }
+
+    Ok(())
   }
 
   fn modules(&mut self) -> Vec<Dynamic> {
@@ -149,6 +158,16 @@ impl ModuleMetadata {
     }
 
     Ok(module)
+  }
+
+  pub fn add_encode_calls(&self, engine: &mut Engine, scope: &mut Scope<'_>) -> Result<(), Box<EvalAltResult>> {
+    let mut map = RMap::new();
+    for (name, func) in &self.funcs {
+      map.insert(name.into(), func.add_encode_calls(engine)?);
+    }
+
+    scope.push_dynamic(self.name.clone(), map.into());
+    Ok(())
   }
 
   fn funcs(&mut self) -> Vec<Dynamic> {
@@ -458,6 +477,21 @@ impl FuncMetadata {
     Ok(func)
   }
 
+  pub fn add_encode_calls(&self, engine: &mut Engine) -> Result<Dynamic, Box<EvalAltResult>> {
+    let full_name = format!("{}_{}", self.mod_name, self.name);
+    let mut args = vec![TypeId::of::<RMap>(), TypeId::of::<FuncMetadata>()];
+    let args_len = self.args.len();
+    if args_len > 0 {
+      args.extend([TypeId::of::<Dynamic>()].repeat(args_len));
+    }
+    #[allow(deprecated)]
+    engine.register_raw_fn(&full_name, &args, encode_call);
+
+    let mut encode_call = FnPtr::new(full_name)?;
+    encode_call.add_curry(Dynamic::from(self.clone()));
+    Ok(Dynamic::from(encode_call))
+  }
+
   fn args(&mut self) -> Dynamic {
     let args: Vec<Dynamic> = self.args.iter().map(|arg| Dynamic::from(arg.clone())).collect();
     Dynamic::from(args)
@@ -567,8 +601,8 @@ impl Docs {
 }
 
 fn encode_call(_ctx: NativeCallContext, args: &mut [&mut Dynamic]) -> Result<EncodedCall, Box<EvalAltResult>> {
-  let func = args.get(0).and_then(|a| (*a).clone().try_cast::<FuncMetadata>()).ok_or_else(|| format!("Missing arg 0."))?;
-  func.encode_call(&args[1..])
+  let func = args.get(1).and_then(|a| (*a).clone().try_cast::<FuncMetadata>()).ok_or_else(|| format!("Missing arg 0."))?;
+  func.encode_call(&args[2..])
 }
 
 pub fn init_engine(engine: &mut Engine) {
@@ -576,16 +610,19 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<Metadata>("Metadata")
     .register_get("modules", Metadata::modules)
     .register_indexer_get_result(Metadata::indexer_get)
+
     .register_type_with_name::<ModuleMetadata>("ModuleMetadata")
     .register_get("funcs", ModuleMetadata::funcs)
     .register_get("events", ModuleMetadata::events)
     .register_get("storage", ModuleMetadata::storage)
     .register_fn("to_string", ModuleMetadata::to_string)
     .register_indexer_get_result(ModuleMetadata::indexer_get)
+
     .register_type_with_name::<StorageMetadata>("StorageMetadata")
     .register_fn("to_string", StorageMetadata::to_string)
     .register_get("title", StorageMetadata::title)
     .register_get("docs", StorageMetadata::docs)
+
     .register_type_with_name::<FuncMetadata>("FuncMetadata")
     .register_fn("to_string", FuncMetadata::to_string)
     .register_get("args", FuncMetadata::args)
@@ -614,6 +651,7 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<EncodedCall>("EncodedCall")
     .register_fn("len", EncodedCall::len)
     .register_fn("to_string", EncodedCall::to_string)
+
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
@@ -623,20 +661,14 @@ pub fn init_scope(url: &str, lookup: &TypeLookup, engine: &mut Engine, scope: &m
   let metadata = Metadata::new(url, lookup)?;
   scope.push_constant("METADATA", metadata.clone());
 
-  let mut args = vec![TypeId::of::<FuncMetadata>()];
-  for arg_len in 1..5 {
-    if args.len() < arg_len {
-      args.push(TypeId::of::<Dynamic>());
-    }
-    #[allow(deprecated)]
-    engine.register_raw_fn("encode_call", &args, encode_call);
-  }
-
   lookup.custom_encode_type("Call", TypeId::of::<EncodedCall>(), |value, data| {
     let call = value.cast::<EncodedCall>();
     data.encode(call);
     Ok(())
   })?;
+
+  // Register each module as a global constant.
+  metadata.add_encode_calls(engine, scope)?;
 
   Ok(metadata)
 }

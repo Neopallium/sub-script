@@ -17,11 +17,16 @@ use super::metadata::EncodedCall;
 
 pub struct InnerClient {
   api: Api<Pair>,
+  nonce: u32,
 }
 
 impl InnerClient {
   pub fn from_api(api: Api<Pair>) -> Arc<RwLock<Self>> {
-    Arc::new(RwLock::new(Self { api }))
+    let nonce = api.get_nonce().saturating_sub(1);
+    Arc::new(RwLock::new(Self {
+      api,
+      nonce,
+    }))
   }
 
   pub fn check_url(&self, url: &str) -> bool {
@@ -40,12 +45,14 @@ impl InnerClient {
     Ok(self.api.get_metadata().map_err(|e| e.to_string())?)
   }
 
-  pub fn submit_call(&self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+  pub fn submit_call(&mut self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+    let mut nonce = self.nonce;
     let xt = if let Some(signer) = &self.api.signer {
+      nonce += 1;
       compose_extrinsic_offline(
         signer,
         call.into_call(),
-        self.api.get_nonce(),
+        nonce,
         Era::Immortal,
         self.api.genesis_hash,
         self.api.genesis_hash,
@@ -61,6 +68,7 @@ impl InnerClient {
     let hash = self.api.send_extrinsic(xt, XtStatus::InBlock)
       .map_err(|e| e.to_string())?;
 
+    self.nonce = nonce;
     /*
     if let Some(hash) = hash {
       let events = self.api.get_storage_value("System", "Events", Some(hash))
@@ -105,7 +113,7 @@ impl Client {
   }
 
   pub fn submit_call(&self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
-    self.inner.read().unwrap().submit_call(call)
+    self.inner.write().unwrap().submit_call(call)
   }
 
   pub fn inner(&self) -> Arc<RwLock<InnerClient>> {

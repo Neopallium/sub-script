@@ -116,7 +116,7 @@ pub fn init_engine(engine: &mut Engine) {
     .register_result_fn("connect", User::connect)
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
-    .register_result_fn("submit_call", User::submit_call)
+    .register_result_fn("submit", User::submit_call)
 
     .register_type_with_name::<Account>("Account")
     .register_fn("to_string", Account::to_string)

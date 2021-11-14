@@ -12,7 +12,7 @@ use parity_scale_codec::Compact;
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
 use smartstring::{LazyCompact, SmartString};
-use rhai::{Array, Dynamic, Engine, EvalAltResult, Map as RMap, Scope};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap, Scope};
 
 use indexmap::map::IndexMap;
 
@@ -478,35 +478,35 @@ impl Types {
           .ok_or_else(|| format!("Failed to parse Vec/Option/Compact: {}", def))?;
         match wrap {
           "Vec" => {
-            let wrap_meta = self.parse_type(ty)?;
-            Ok(TypeMeta::Vector(wrap_meta))
+            let wrap_ref = self.parse_type(ty)?;
+            Ok(TypeMeta::Vector(wrap_ref))
           }
           "Option" => {
-            let wrap_meta = self.parse_type(ty)?;
-            Ok(TypeMeta::Option(wrap_meta))
+            let wrap_ref = self.parse_type(ty)?;
+            Ok(TypeMeta::Option(wrap_ref))
           }
           "Compact" => {
-            let wrap_meta = self.parse_type(ty)?;
-            Ok(TypeMeta::Compact(wrap_meta))
+            let wrap_ref = self.parse_type(ty)?;
+            Ok(TypeMeta::Compact(wrap_ref))
           }
           "Box" => {
-            let wrap_meta = self.parse_type(ty)?;
-            Ok(TypeMeta::Box(wrap_meta))
+            let wrap_ref = self.parse_type(ty)?;
+            Ok(TypeMeta::Box(wrap_ref))
           }
           "Result" => {
-            let (ok_meta, err_meta) = match ty.split_once(',') {
+            let (ok_ref, err_ref) = match ty.split_once(',') {
               Some((ok_ty, err_ty)) => {
-                let ok_meta = self.parse_type(ok_ty)?;
-                let err_meta = self.parse_type(err_ty)?;
-                (ok_meta, err_meta)
+                let ok_ref = self.parse_type(ok_ty)?;
+                let err_ref = self.parse_type(err_ty)?;
+                (ok_ref, err_ref)
               }
               None => {
-                let ok_meta = self.parse_type(ty)?;
-                let err_meta = self.parse_type("Error")?;
-                (ok_meta, err_meta)
+                let ok_ref = self.parse_type(ty)?;
+                let err_ref = self.parse_type("Error")?;
+                (ok_ref, err_ref)
               }
             };
-            Ok(TypeMeta::Result(ok_meta, err_meta))
+            Ok(TypeMeta::Result(ok_ref, err_ref))
           }
           "PhantomData" | "sp_std::marker::PhantomData" => {
             Ok(TypeMeta::Unit)
@@ -534,8 +534,8 @@ impl Types {
             }
           })
           .try_fold(Vec::new(), |mut vec, val| -> Result<_, Box<EvalAltResult>> {
-            let type_meta = self.parse_type(val)?;
-            vec.push(type_meta);
+            let type_ref = self.parse_type(val)?;
+            vec.push(type_ref);
             Ok(vec)
           })?;
         // Handle tuples.
@@ -551,8 +551,8 @@ impl Types {
               .map(|l| (ty.trim(), l))
           }).ok_or_else(|| format!("Failed to parse slice: {}", def))?;
         // Handle slices.
-        let slice_meta = self.parse_type(slice_ty)?;
-        Ok(TypeMeta::Slice(slice_len, slice_meta))
+        let slice_ref = self.parse_type(slice_ty)?;
+        Ok(TypeMeta::Slice(slice_len, slice_ref))
       }
       _ => {
         Ok(TypeMeta::Unresolved(def.into()))
@@ -728,6 +728,19 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
     // Encode variant idx.
     data.encode(0u8); // MultiAddress::Id
     data.encode(user.public());
+    Ok(())
+  })?;
+  types.custom_encode_type("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
+    let value = value.cast::<ImmutableString>();
+    if value.len() == 12 {
+      data.encode(value.as_str());
+    } else {
+      let mut ticker = [0u8; 12];
+      for (idx, b) in value.as_str().as_bytes().iter().take(12).enumerate() {
+        ticker[idx] = *b;
+      }
+      data.encode(&ticker);
+    }
     Ok(())
   })?;
 
