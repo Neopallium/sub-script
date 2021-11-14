@@ -70,9 +70,7 @@ impl Metadata {
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
         let m = ModuleMetadata::decode(m, lookup)?;
         let name = m.name.clone();
-        if let Some(event_ref) = &m.event_ref {
-          mod_events.insert(name.clone(), Some(event_ref.clone()));
-        }
+        mod_events.insert(name.clone(), m.event_ref.clone());
         api_md.modules.insert(name, m);
         Ok(())
       })?;

@@ -113,6 +113,7 @@
   "DigestOf<T>": "Digest<Hash>",
   "ReportIdOf<T>": "Hash",
 	"EventIndex": "u32",
+	"EventRecords": "Vec<EventRecord<Event, Hash>>",
 	"EventRecord<Event, Hash>": {
 		"phase": "Phase",
 		"event": "Event",

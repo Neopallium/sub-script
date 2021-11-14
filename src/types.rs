@@ -3,11 +3,12 @@ use std::fs::File;
 use std::io::BufReader;
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use serde_json::{
   Value, Map,
 };
-use parity_scale_codec::Compact;
+use parity_scale_codec::{Compact, Input, Decode, Error as PError};
 
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
@@ -35,6 +36,14 @@ impl TypeRef {
 
   pub fn encode_value(&self, param: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
     self.0.read().unwrap().encode_value(param, data)
+  }
+
+  pub fn decode_value<I: Input>(&self, input: &mut I, is_compact: bool) -> Result<Dynamic, PError> {
+    self.0.read().unwrap().decode_value(input, is_compact)
+  }
+
+  pub fn decode(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
+    Ok(self.decode_value(&mut &data[..], false).map_err(|e| e.to_string())?)
   }
 }
 
@@ -333,6 +342,169 @@ impl TypeMeta {
       },
     }
     Ok(())
+  }
+
+  pub fn decode_value<I: Input>(&self, input: &mut I, is_compact: bool) -> Result<Dynamic, PError> {
+    let val = match self {
+      TypeMeta::Unit => Dynamic::UNIT,
+      TypeMeta::Integer(len, signed) => {
+        match (len, signed) {
+          (_, false) if is_compact => {
+            let val = Compact::<u128>::decode(input)?.0;
+            match i64::try_from(val) {
+              Ok(val) => Dynamic::from_int(val),
+              Err(_) => {
+                let dec = Decimal::from(val);
+                Dynamic::from_decimal(dec)
+              }
+            }
+          }
+          (1, true) => {
+            Dynamic::from_int(i8::decode(input)? as i64)
+          },
+          (1, false) => {
+            Dynamic::from_int(u8::decode(input)? as i64)
+          },
+          (2, true) => {
+            Dynamic::from_int(i16::decode(input)? as i64)
+          },
+          (2, false) => {
+            Dynamic::from_int(u16::decode(input)? as i64)
+          },
+          (4, true) => {
+            Dynamic::from_int(i32::decode(input)? as i64)
+          },
+          (4, false) => {
+            Dynamic::from_int(u32::decode(input)? as i64)
+          },
+          (8, true) => {
+            Dynamic::from_int(i64::decode(input)?)
+          },
+          (8, false) => {
+            let val = u64::decode(input)?;
+            match i64::try_from(val) {
+              Ok(val) => Dynamic::from_int(val),
+              Err(_) => {
+                let dec = Decimal::from(val);
+                Dynamic::from_decimal(dec)
+              }
+            }
+          }
+          (16, true) => {
+            let val = i128::decode(input)?;
+            let dec = Decimal::from(val);
+            Dynamic::from_decimal(dec)
+          },
+          (16, false) => {
+            let val = u128::decode(input)?;
+            let dec = Decimal::from(val);
+            Dynamic::from_decimal(dec)
+          },
+          _ => Err("Unsupported integer type")?,
+        }
+      },
+      TypeMeta::Bool => {
+        let val = input.read_byte()?;
+        Dynamic::from_bool(val == 1)
+      },
+      TypeMeta::Option(type_ref) => {
+        let val = input.read_byte()?;
+        if val == 1 {
+          type_ref.decode_value(input, false)?
+        } else {
+          Dynamic::UNIT
+        }
+      },
+      TypeMeta::OptionBool => {
+        let val = input.read_byte()?;
+        if val == 1 {
+          Dynamic::from_bool(true)
+        } else if val == 2 {
+          Dynamic::from_bool(false)
+        } else {
+          Dynamic::UNIT
+        }
+      },
+      TypeMeta::Result(ok_ref, err_ref) => {
+        let val = input.read_byte()?;
+        let mut map = RMap::new();
+        if val == 0 {
+          map.insert("Ok".into(), ok_ref.decode_value(input, false)?);
+        } else {
+          map.insert("Err".into(), err_ref.decode_value(input, false)?);
+        }
+        Dynamic::from(map)
+      },
+      TypeMeta::Vector(type_ref) => {
+        let len = Compact::<u64>::decode(input)?.0;
+        let mut vec = Vec::new();
+        for _ in 0..len {
+          vec.push(type_ref.decode_value(input, false)?);
+        }
+        Dynamic::from(vec)
+      },
+      TypeMeta::Slice(len, type_ref) => {
+        let mut vec = Vec::with_capacity(*len as usize);
+        for _ in 0..*len {
+          vec.push(type_ref.decode_value(input, false)?);
+        }
+        Dynamic::from(vec)
+      },
+      TypeMeta::String => {
+        let val = String::decode(input)?;
+        Dynamic::from(val)
+      },
+
+      TypeMeta::Tuple(types) => {
+        let mut vec = Vec::with_capacity(types.len());
+        for type_ref in types {
+          vec.push(type_ref.decode_value(input, false)?);
+        }
+        Dynamic::from(vec)
+      },
+      TypeMeta::Struct(fields) => {
+        let mut map = RMap::new();
+        for (name, type_ref) in fields {
+          map.insert(name.into(), type_ref.decode_value(input, false)?);
+        }
+        Dynamic::from(map)
+      },
+      TypeMeta::Enum(variants) => {
+        let val = input.read_byte()?;
+        match variants.get_index(val as usize) {
+          Some((key, Some(type_ref))) => {
+            let mut map = RMap::new();
+            map.insert(key.into(), type_ref.decode_value(input, false)?);
+            Dynamic::from(map)
+          }
+          Some((key, None)) => {
+            let mut map = RMap::new();
+            map.insert(key.into(), Dynamic::UNIT);
+            Dynamic::from(map)
+          }
+          None => {
+            eprintln!("invalid variant: {}, remaining: {:?}", val, input.remaining_len()?);
+            Err("Error decoding Enum, invalid variant.")?
+          }
+        }
+      },
+
+      TypeMeta::Compact(type_ref) => {
+        type_ref.decode_value(input, true)?
+      },
+      TypeMeta::Box(type_ref) | TypeMeta::NewType(_, type_ref) => {
+        type_ref.decode_value(input, false)?
+      },
+
+      TypeMeta::CustomEncode(_type_map, type_meta) => {
+        type_meta.decode_value(input, false)?
+      },
+      TypeMeta::Unresolved(type_def) => {
+        eprintln!("Unresolved type: {}", type_def);
+        Err("Unresolved type")?
+      },
+    };
+    Ok(val)
   }
 }
 
@@ -696,6 +868,7 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("to_string", TypeMeta::to_string)
     .register_type_with_name::<TypeRef>("TypeRef")
     .register_fn("to_string", TypeRef::to_string)
+    .register_result_fn("decode", TypeRef::decode)
     ;
 }
 

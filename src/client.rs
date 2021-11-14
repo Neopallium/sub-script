@@ -4,14 +4,14 @@ use frame_metadata::RuntimeMetadataPrefixed;
 use sp_runtime::generic::Era;
 use sp_core::sr25519::Pair;
 
-use substrate_api_client::Api;
+use substrate_api_client::{Api, Hash, StorageValue};
 use substrate_api_client::rpc::XtStatus;
 use substrate_api_client::extrinsic::{
   compose_extrinsic_offline,
   xt_primitives::*,
 };
 
-use rhai::{Engine, EvalAltResult};
+use rhai::{Dynamic, Engine, EvalAltResult};
 
 use super::metadata::EncodedCall;
 
@@ -45,7 +45,11 @@ impl InnerClient {
     Ok(self.api.get_metadata().map_err(|e| e.to_string())?)
   }
 
-  pub fn submit_call(&mut self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+  pub fn get_storage_value(&self, prefix: &str, key_name: &str, at_block: Option<Hash>) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    Ok(self.api.get_storage_value(prefix, key_name, at_block).map_err(|e| e.to_string())?)
+  }
+
+  pub fn submit_call(&mut self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
     let mut nonce = self.nonce;
     let xt = if let Some(signer) = &self.api.signer {
       nonce += 1;
@@ -75,10 +79,11 @@ impl InnerClient {
         .map_err(|e| e.to_string())?;
       eprintln!("events = {:?}", events)
     }
-    */
-
     Ok(hash.map(|hash| format!("{:x}", hash))
       .unwrap_or_default())
+    */
+
+    Ok(hash)
   }
 }
 
@@ -112,7 +117,20 @@ impl Client {
     self.inner.read().unwrap().get_metadata()
   }
 
-  pub fn submit_call(&self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+  pub fn get_storage_value(&mut self, prefix: &str, key_name: &str, at_block: Option<Hash>) -> Result<Dynamic, Box<EvalAltResult>> {
+    let value = self.inner.read().unwrap().get_storage_value(prefix, key_name, at_block)?;
+    match value {
+      Some(value) => {
+        let data = Vec::from(&*value);
+        Ok(Dynamic::from(data))
+      }
+      None => {
+        Ok(Dynamic::UNIT)
+      }
+    }
+  }
+
+  pub fn submit_call(&self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
     self.inner.write().unwrap().submit_call(call)
   }
 
@@ -124,5 +142,6 @@ impl Client {
 pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<Client>("Client")
+    .register_result_fn("get_storage_value", Client::get_storage_value)
     .register_fn("print_metadata", Client::print_metadata);
 }

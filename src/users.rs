@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use sp_core::sr25519;
 use sp_core::Pair;
 
+use substrate_api_client::Hash;
+
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
 use crate::client::Client;
@@ -65,7 +67,7 @@ impl User {
     }
   }
 
-  pub fn submit_call(&mut self, call: EncodedCall) -> Result<String, Box<EvalAltResult>> {
+  pub fn submit_call(&mut self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
     self.get_or_connect()?.submit_call(call)
   }
 
