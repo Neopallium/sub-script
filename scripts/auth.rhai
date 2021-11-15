@@ -1,6 +1,4 @@
-// Try batching mock cdd registrations.
-
-print("Batching: Mock CDD");
+print("Create a JoinIdentity authorization.");
 
 // Use Alice for mocking cdd.
 let alice = USER.Alice;
