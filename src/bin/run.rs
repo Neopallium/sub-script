@@ -1,4 +1,4 @@
-use substrate_cli::engine::*;
+use sub_script::engine::*;
 
 use std::{env, fs::File, io::Read, path::Path, process::exit};
 

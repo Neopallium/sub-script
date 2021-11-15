@@ -3310,6 +3310,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sub-script"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dotenv",
+ "env_logger",
+ "frame-metadata",
+ "hex",
+ "indexmap",
+ "parity-scale-codec",
+ "rhai",
+ "rust_decimal",
+ "serde_json",
+ "smartstring",
+ "sp-core",
+ "sp-keyring",
+ "sp-runtime",
+ "substrate-api-client",
+]
+
+[[package]]
 name = "substrate-api-client"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3343,27 +3364,6 @@ dependencies = [
  "schnorrkel",
  "sha2 0.9.8",
  "zeroize",
-]
-
-[[package]]
-name = "substrate-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dotenv",
- "env_logger",
- "frame-metadata",
- "hex",
- "indexmap",
- "parity-scale-codec",
- "rhai",
- "rust_decimal",
- "serde_json",
- "smartstring",
- "sp-core",
- "sp-keyring",
- "sp-runtime",
- "substrate-api-client",
 ]
 
 [[package]]
