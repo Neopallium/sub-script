@@ -20,9 +20,8 @@ use indexmap::map::IndexMap;
 use super::metadata::EncodedArgs;
 use super::users::User;
 
-pub type EncodeFn = dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>;
 #[derive(Clone)]
-pub struct WrapEncodeFn(Arc<EncodeFn>);
+pub struct WrapEncodeFn(Arc<dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>>);
 
 impl WrapEncodeFn {
   pub fn encode_value(
@@ -53,9 +52,8 @@ impl<'a> Input for BoxedInput<'a> {
   }
 }
 
-pub type DecodeFn = dyn Fn(BoxedInput) -> Result<Dynamic, PError>;
 #[derive(Clone)]
-pub struct WrapDecodeFn(Arc<DecodeFn>);
+pub struct WrapDecodeFn(Arc<dyn Fn(BoxedInput) -> Result<Dynamic, PError>>);
 
 impl WrapDecodeFn {
   pub fn decode_value<I: Input>(&self, input: &mut I) -> Result<Dynamic, PError> {
