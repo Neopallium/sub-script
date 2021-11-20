@@ -12,8 +12,8 @@ fn main() -> Result<()> {
 
   let mut contents = String::new();
 
-  let (engine, mut scope) = init_engine(&url)
-    .map_err(|e| anyhow!("Failed to initial engine: {:?}", e))?;
+  let (engine, mut scope) =
+    init_engine(&url).map_err(|e| anyhow!("Failed to initial engine: {:?}", e))?;
 
   for filename in env::args().skip(1) {
     let filename = match Path::new(&filename).canonicalize() {

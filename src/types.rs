@@ -1,33 +1,35 @@
-use std::sync::{Arc, RwLock};
-use std::fs::File;
-use std::io::BufReader;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fs::File;
+use std::io::BufReader;
+use std::sync::{Arc, RwLock};
 
-use serde_json::{
-  Value, Map,
-};
-use parity_scale_codec::{Compact, Input, Decode, Encode, Error as PError};
+use parity_scale_codec::{Compact, Decode, Encode, Error as PError, Input};
+use serde_json::{Map, Value};
 
 use sp_runtime::generic::Era;
 
-use rust_decimal::{Decimal, prelude::ToPrimitive};
+use rust_decimal::{prelude::ToPrimitive, Decimal};
 
-use smartstring::{LazyCompact, SmartString};
 use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap, Scope};
+use smartstring::{LazyCompact, SmartString};
 
 use indexmap::map::IndexMap;
 
-use super::users::User;
 use super::metadata::EncodedArgs;
+use super::users::User;
 
 pub type EncodeFn = dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>;
 #[derive(Clone)]
 pub struct WrapEncodeFn(Arc<EncodeFn>);
 
 impl WrapEncodeFn {
-  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(
+    &self,
+    value: Dynamic,
+    data: &mut EncodedArgs,
+  ) -> Result<(), Box<EvalAltResult>> {
     self.0(value, data)
   }
 }
@@ -92,7 +94,11 @@ impl CustomType {
     self.decode = Some(func);
   }
 
-  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(
+    &self,
+    value: Dynamic,
+    data: &mut EncodedArgs,
+  ) -> Result<(), Box<EvalAltResult>> {
     let type_id = value.type_id();
     if let Some(func) = self.encode_map.get(&type_id) {
       func.encode_value(value, data)
@@ -101,10 +107,14 @@ impl CustomType {
     }
   }
 
-  pub fn decode_value<I: Input>(&self, input: &mut I, _is_compact: bool) -> Result<Dynamic, PError> {
+  pub fn decode_value<I: Input>(
+    &self,
+    input: &mut I,
+    _is_compact: bool,
+  ) -> Result<Dynamic, PError> {
     match &self.decode {
       Some(func) => func.decode_value(input),
-      None => self.type_meta.decode_value(input, false)
+      None => self.type_meta.decode_value(input, false),
     }
   }
 }
@@ -125,7 +135,11 @@ impl TypeRef {
     self.0.write().unwrap().custom_decode(func)
   }
 
-  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(
+    &self,
+    value: Dynamic,
+    data: &mut EncodedArgs,
+  ) -> Result<(), Box<EvalAltResult>> {
     self.0.read().unwrap().encode_value(value, data)
   }
 
@@ -140,7 +154,11 @@ impl TypeRef {
   }
 
   pub fn decode(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
-    Ok(self.decode_value(&mut &data[..], false).map_err(|e| e.to_string())?)
+    Ok(
+      self
+        .decode_value(&mut &data[..], false)
+        .map_err(|e| e.to_string())?,
+    )
   }
 }
 
@@ -233,15 +251,17 @@ impl TypeMeta {
     }
   }
 
-  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(
+    &self,
+    value: Dynamic,
+    data: &mut EncodedArgs,
+  ) -> Result<(), Box<EvalAltResult>> {
     match self {
       TypeMeta::Unit => (),
       TypeMeta::Integer(len, signed) => {
         if let Some(num) = value.as_int().ok() {
           match (len, signed) {
-            (_, false) if data.is_compact() => {
-              data.encode(Compact::<u128>(num as u128))
-            }
+            (_, false) if data.is_compact() => data.encode(Compact::<u128>(num as u128)),
             (1, true) => data.encode(num as i8),
             (1, false) => data.encode(num as u8),
             (2, true) => data.encode(num as i16),
@@ -258,46 +278,78 @@ impl TypeMeta {
           match (len, signed) {
             (_, false) if data.is_compact() => {
               dec *= Decimal::from(1000_000u64);
-              let num = dec.to_u128()
+              let num = dec
+                .to_u128()
                 .ok_or_else(|| format!("Expected unsigned integer"))?;
               data.encode(Compact::<u128>(num))
             }
-            (1, true) => data.encode(dec.to_i8()
-              .ok_or_else(|| format!("Integer too large for `i8`"))?),
-            (1, false) => data.encode(dec.to_u8()
-              .ok_or_else(|| format!("Integer too large for `u8` or negative."))?),
-            (2, true) => data.encode(dec.to_i16()
-              .ok_or_else(|| format!("Integer too large for `i16`"))?),
-            (2, false) => data.encode(dec.to_u16()
-              .ok_or_else(|| format!("Integer too large for `u16` or negative."))?),
-            (4, true) => data.encode(dec.to_i32()
-              .ok_or_else(|| format!("Integer too large for `i32`"))?),
-            (4, false) => data.encode(dec.to_u32()
-              .ok_or_else(|| format!("Integer too large for `u32` or negative."))?),
-            (8, true) => data.encode(dec.to_i64()
-              .ok_or_else(|| format!("Integer too large for `i64`"))?),
-            (8, false) => data.encode(dec.to_u64()
-              .ok_or_else(|| format!("Integer too large for `u64` or negative."))?),
+            (1, true) => data.encode(
+              dec
+                .to_i8()
+                .ok_or_else(|| format!("Integer too large for `i8`"))?,
+            ),
+            (1, false) => data.encode(
+              dec
+                .to_u8()
+                .ok_or_else(|| format!("Integer too large for `u8` or negative."))?,
+            ),
+            (2, true) => data.encode(
+              dec
+                .to_i16()
+                .ok_or_else(|| format!("Integer too large for `i16`"))?,
+            ),
+            (2, false) => data.encode(
+              dec
+                .to_u16()
+                .ok_or_else(|| format!("Integer too large for `u16` or negative."))?,
+            ),
+            (4, true) => data.encode(
+              dec
+                .to_i32()
+                .ok_or_else(|| format!("Integer too large for `i32`"))?,
+            ),
+            (4, false) => data.encode(
+              dec
+                .to_u32()
+                .ok_or_else(|| format!("Integer too large for `u32` or negative."))?,
+            ),
+            (8, true) => data.encode(
+              dec
+                .to_i64()
+                .ok_or_else(|| format!("Integer too large for `i64`"))?,
+            ),
+            (8, false) => data.encode(
+              dec
+                .to_u64()
+                .ok_or_else(|| format!("Integer too large for `u64` or negative."))?,
+            ),
             (16, signed) => {
               // TODO: Add support for other decimal scales.
               dec *= Decimal::from(1000_000u64);
               if *signed {
-                data.encode(dec.to_i128()
-                  .ok_or_else(|| format!("Integer too large for `u128`."))?)
+                data.encode(
+                  dec
+                    .to_i128()
+                    .ok_or_else(|| format!("Integer too large for `u128`."))?,
+                )
               } else {
-                data.encode(dec.to_u128()
-                  .ok_or_else(|| format!("Expected a non-negative integer/decimal."))?)
+                data.encode(
+                  dec
+                    .to_u128()
+                    .ok_or_else(|| format!("Expected a non-negative integer/decimal."))?,
+                )
               }
             }
             _ => Err(format!("Unsupported integer type: {:?}", self))?,
           }
         } else {
-          Err(format!("Expected an integer or decimal value, got {:?}", value))?;
+          Err(format!(
+            "Expected an integer or decimal value, got {:?}",
+            value
+          ))?;
         }
-      },
-      TypeMeta::Bool => {
-        data.encode(value.as_bool()?)
-      },
+      }
+      TypeMeta::Bool => data.encode(value.as_bool()?),
       TypeMeta::Option(type_ref) => {
         if value.is::<()>() {
           // None
@@ -307,10 +359,8 @@ impl TypeMeta {
           data.encode(1u8);
           type_ref.encode_value(value, data)?
         }
-      },
-      TypeMeta::OptionBool => {
-        data.encode(value.as_bool().ok())
-      },
+      }
+      TypeMeta::OptionBool => data.encode(value.as_bool().ok()),
       TypeMeta::Vector(type_ref) => {
         if value.is::<Array>() {
           let values = value.cast::<Array>();
@@ -322,12 +372,16 @@ impl TypeMeta {
         } else {
           Err(format!("Expected a vector, got {:?}", value.type_id()))?;
         }
-      },
+      }
       TypeMeta::Slice(len, type_ref) => {
         if value.is::<Array>() {
           let values = value.cast::<Array>();
           if values.len() != *len {
-            Err(format!("Wrong slice length: Expected {} got {}", len, values.len()))?;
+            Err(format!(
+              "Wrong slice length: Expected {} got {}",
+              len,
+              values.len()
+            ))?;
           }
           for value in values.into_iter() {
             type_ref.encode_value(value, data)?
@@ -337,20 +391,27 @@ impl TypeMeta {
             let user = value.cast::<User>();
             data.encode(user.public());
           } else {
-            Err(format!("Unhandled slice type: {:?}, value={:?}", self, value))?;
+            Err(format!(
+              "Unhandled slice type: {:?}, value={:?}",
+              self, value
+            ))?;
           }
         }
-      },
+      }
       TypeMeta::String => {
         let s = value.into_immutable_string()?;
         data.encode(s.as_str());
-      },
+      }
 
       TypeMeta::Tuple(types) => {
         if value.is::<Array>() {
           let values = value.cast::<Array>();
           if values.len() != types.len() {
-            Err(format!("Wrong Tuple length: Expected {} got {}", types.len(), values.len()))?;
+            Err(format!(
+              "Wrong Tuple length: Expected {} got {}",
+              types.len(),
+              values.len()
+            ))?;
           }
           for (type_ref, value) in types.iter().zip(values.into_iter()) {
             type_ref.encode_value(value, data)?
@@ -358,7 +419,7 @@ impl TypeMeta {
         } else {
           Err(format!("Expected a Tuple, got {:?}", value.type_id()))?;
         }
-      },
+      }
       TypeMeta::Struct(fields) => {
         if value.is::<RMap>() {
           let map = value.cast::<RMap>();
@@ -373,7 +434,7 @@ impl TypeMeta {
         } else {
           Err(format!("Expected a Struct, got {:?}", value.type_id()))?;
         }
-      },
+      }
       TypeMeta::Enum(variants) => {
         if value.is::<RMap>() {
           let map = value.cast::<RMap>();
@@ -401,7 +462,7 @@ impl TypeMeta {
         } else {
           Err(format!("Expected a Enum, got {:?}", value.type_id()))?;
         }
-      },
+      }
 
       TypeMeta::Compact(type_ref) => {
         let old = data.is_compact();
@@ -409,20 +470,14 @@ impl TypeMeta {
         let res = type_ref.encode_value(value, data);
         data.set_compact(old);
         res?
-      },
+      }
       TypeMeta::Box(type_ref) | TypeMeta::NewType(_, type_ref) => {
         type_ref.encode_value(value, data)?
-      },
+      }
 
-      TypeMeta::CustomType(custom) => {
-        custom.encode_value(value, data)?
-      },
-      TypeMeta::Unresolved(type_def) => {
-        Err(format!("Unresolved type: {}", type_def))?
-      },
-      _ => {
-        Err(format!("Unhandled type: {:?}", self))?
-      },
+      TypeMeta::CustomType(custom) => custom.encode_value(value, data)?,
+      TypeMeta::Unresolved(type_def) => Err(format!("Unresolved type: {}", type_def))?,
+      _ => Err(format!("Unhandled type: {:?}", self))?,
     }
     Ok(())
   }
@@ -430,66 +485,50 @@ impl TypeMeta {
   pub fn decode_value<I: Input>(&self, input: &mut I, is_compact: bool) -> Result<Dynamic, PError> {
     let val = match self {
       TypeMeta::Unit => Dynamic::UNIT,
-      TypeMeta::Integer(len, signed) => {
-        match (len, signed) {
-          (_, false) if is_compact => {
-            let val = Compact::<u128>::decode(input)?.0;
-            match i64::try_from(val) {
-              Ok(val) => Dynamic::from_int(val),
-              Err(_) => {
-                let dec = Decimal::from(val);
-                Dynamic::from_decimal(dec)
-              }
+      TypeMeta::Integer(len, signed) => match (len, signed) {
+        (_, false) if is_compact => {
+          let val = Compact::<u128>::decode(input)?.0;
+          match i64::try_from(val) {
+            Ok(val) => Dynamic::from_int(val),
+            Err(_) => {
+              let dec = Decimal::from(val);
+              Dynamic::from_decimal(dec)
             }
           }
-          (1, true) => {
-            Dynamic::from_int(i8::decode(input)? as i64)
-          },
-          (1, false) => {
-            Dynamic::from_int(u8::decode(input)? as i64)
-          },
-          (2, true) => {
-            Dynamic::from_int(i16::decode(input)? as i64)
-          },
-          (2, false) => {
-            Dynamic::from_int(u16::decode(input)? as i64)
-          },
-          (4, true) => {
-            Dynamic::from_int(i32::decode(input)? as i64)
-          },
-          (4, false) => {
-            Dynamic::from_int(u32::decode(input)? as i64)
-          },
-          (8, true) => {
-            Dynamic::from_int(i64::decode(input)?)
-          },
-          (8, false) => {
-            let val = u64::decode(input)?;
-            match i64::try_from(val) {
-              Ok(val) => Dynamic::from_int(val),
-              Err(_) => {
-                let dec = Decimal::from(val);
-                Dynamic::from_decimal(dec)
-              }
-            }
-          }
-          (16, true) => {
-            let val = i128::decode(input)?;
-            let dec = Decimal::from(val);
-            Dynamic::from_decimal(dec)
-          },
-          (16, false) => {
-            let val = u128::decode(input)?;
-            let dec = Decimal::from(val);
-            Dynamic::from_decimal(dec)
-          },
-          _ => Err("Unsupported integer type")?,
         }
+        (1, true) => Dynamic::from_int(i8::decode(input)? as i64),
+        (1, false) => Dynamic::from_int(u8::decode(input)? as i64),
+        (2, true) => Dynamic::from_int(i16::decode(input)? as i64),
+        (2, false) => Dynamic::from_int(u16::decode(input)? as i64),
+        (4, true) => Dynamic::from_int(i32::decode(input)? as i64),
+        (4, false) => Dynamic::from_int(u32::decode(input)? as i64),
+        (8, true) => Dynamic::from_int(i64::decode(input)?),
+        (8, false) => {
+          let val = u64::decode(input)?;
+          match i64::try_from(val) {
+            Ok(val) => Dynamic::from_int(val),
+            Err(_) => {
+              let dec = Decimal::from(val);
+              Dynamic::from_decimal(dec)
+            }
+          }
+        }
+        (16, true) => {
+          let val = i128::decode(input)?;
+          let dec = Decimal::from(val);
+          Dynamic::from_decimal(dec)
+        }
+        (16, false) => {
+          let val = u128::decode(input)?;
+          let dec = Decimal::from(val);
+          Dynamic::from_decimal(dec)
+        }
+        _ => Err("Unsupported integer type")?,
       },
       TypeMeta::Bool => {
         let val = input.read_byte()?;
         Dynamic::from_bool(val == 1)
-      },
+      }
       TypeMeta::Option(type_ref) => {
         let val = input.read_byte()?;
         if val == 1 {
@@ -497,7 +536,7 @@ impl TypeMeta {
         } else {
           Dynamic::UNIT
         }
-      },
+      }
       TypeMeta::OptionBool => {
         let val = input.read_byte()?;
         if val == 1 {
@@ -507,7 +546,7 @@ impl TypeMeta {
         } else {
           Dynamic::UNIT
         }
-      },
+      }
       TypeMeta::Result(ok_ref, err_ref) => {
         let val = input.read_byte()?;
         let mut map = RMap::new();
@@ -517,7 +556,7 @@ impl TypeMeta {
           map.insert("Err".into(), err_ref.decode_value(input, false)?);
         }
         Dynamic::from(map)
-      },
+      }
       TypeMeta::Vector(type_ref) => {
         let len = Compact::<u64>::decode(input)?.0;
         let mut vec = Vec::new();
@@ -525,18 +564,18 @@ impl TypeMeta {
           vec.push(type_ref.decode_value(input, false)?);
         }
         Dynamic::from(vec)
-      },
+      }
       TypeMeta::Slice(len, type_ref) => {
         let mut vec = Vec::with_capacity(*len as usize);
         for _ in 0..*len {
           vec.push(type_ref.decode_value(input, false)?);
         }
         Dynamic::from(vec)
-      },
+      }
       TypeMeta::String => {
         let val = String::decode(input)?;
         Dynamic::from(val)
-      },
+      }
 
       TypeMeta::Tuple(types) => {
         let mut vec = Vec::with_capacity(types.len());
@@ -544,14 +583,14 @@ impl TypeMeta {
           vec.push(type_ref.decode_value(input, false)?);
         }
         Dynamic::from(vec)
-      },
+      }
       TypeMeta::Struct(fields) => {
         let mut map = RMap::new();
         for (name, type_ref) in fields {
           map.insert(name.into(), type_ref.decode_value(input, false)?);
         }
         Dynamic::from(map)
-      },
+      }
       TypeMeta::Enum(variants) => {
         let val = input.read_byte()?;
         match variants.get_index(val as usize) {
@@ -566,26 +605,26 @@ impl TypeMeta {
             Dynamic::from(map)
           }
           None => {
-            eprintln!("invalid variant: {}, remaining: {:?}", val, input.remaining_len()?);
+            eprintln!(
+              "invalid variant: {}, remaining: {:?}",
+              val,
+              input.remaining_len()?
+            );
             Err("Error decoding Enum, invalid variant.")?
           }
         }
-      },
+      }
 
-      TypeMeta::Compact(type_ref) => {
-        type_ref.decode_value(input, true)?
-      },
+      TypeMeta::Compact(type_ref) => type_ref.decode_value(input, true)?,
       TypeMeta::Box(type_ref) | TypeMeta::NewType(_, type_ref) => {
         type_ref.decode_value(input, false)?
-      },
+      }
 
-      TypeMeta::CustomType(custom) => {
-        custom.decode_value(input, false)?
-      },
+      TypeMeta::CustomType(custom) => custom.decode_value(input, false)?,
       TypeMeta::Unresolved(type_def) => {
         eprintln!("Unresolved type: {}", type_def);
         Err("Unresolved type")?
-      },
+      }
     };
     Ok(val)
   }
@@ -606,9 +645,11 @@ impl Types {
   pub fn load_schema(&mut self, filename: &str) -> Result<(), Box<EvalAltResult>> {
     let file = File::open(filename).map_err(|e| e.to_string())?;
 
-    let schema: serde_json::Value = serde_json::from_reader(BufReader::new(file)).map_err(|e| e.to_string())?;
+    let schema: serde_json::Value =
+      serde_json::from_reader(BufReader::new(file)).map_err(|e| e.to_string())?;
 
-    let schema = schema.as_object()
+    let schema = schema
+      .as_object()
       .expect("Invalid schema, expected object.");
 
     let types = match schema.get("types") {
@@ -644,32 +685,38 @@ impl Types {
   fn parse_enum(&mut self, name: &str, variants: &Value) -> Result<(), Box<EvalAltResult>> {
     match variants {
       Value::Array(arr) => {
-        let variants = arr.iter().try_fold(IndexMap::new(), |mut map, val| {
-          match val.as_str() {
+        let variants = arr
+          .iter()
+          .try_fold(IndexMap::new(), |mut map, val| match val.as_str() {
             Some(name) => {
               map.insert(name.to_string(), None);
               Ok(map)
             }
-            None => Err(format!("Expected json string for enum {}: got {:?}", name, val)),
-          }
-        })?;
+            None => Err(format!(
+              "Expected json string for enum {}: got {:?}",
+              name, val
+            )),
+          })?;
         self.insert_meta(name, TypeMeta::Enum(variants));
       }
       Value::Object(obj) => {
-        let variants = obj.iter().try_fold(IndexMap::new(), |mut map, (var_name, val)| -> Result<_, Box<EvalAltResult>> {
-          match val.as_str() {
-            Some("") => {
-              map.insert(var_name.to_string(), None);
-              Ok(map)
+        let variants = obj.iter().try_fold(
+          IndexMap::new(),
+          |mut map, (var_name, val)| -> Result<_, Box<EvalAltResult>> {
+            match val.as_str() {
+              Some("") => {
+                map.insert(var_name.to_string(), None);
+                Ok(map)
+              }
+              Some(var_def) => {
+                let type_meta = self.parse_type(var_def)?;
+                map.insert(var_name.to_string(), Some(type_meta));
+                Ok(map)
+              }
+              None => Err(format!("Expected json string for enum {}: got {:?}", name, val).into()),
             }
-            Some(var_def) => {
-              let type_meta = self.parse_type(var_def)?;
-              map.insert(var_name.to_string(), Some(type_meta));
-              Ok(map)
-            }
-            None => Err(format!("Expected json string for enum {}: got {:?}", name, val).into()),
-          }
-        })?;
+          },
+        )?;
         self.insert_meta(name, TypeMeta::Enum(variants));
       }
       _ => {
@@ -679,17 +726,30 @@ impl Types {
     Ok(())
   }
 
-  fn parse_struct(&mut self, name: &str, def: &Map<String, Value>) -> Result<(), Box<EvalAltResult>> {
-    let fields = def.iter().try_fold(IndexMap::new(), |mut map, (field_name, val)| -> Result<_, Box<EvalAltResult>> {
-      match val.as_str() {
-        Some(field_def) => {
-          let type_meta = self.parse_type(field_def)?;
-          map.insert(field_name.to_string(), type_meta);
-          Ok(map)
+  fn parse_struct(
+    &mut self,
+    name: &str,
+    def: &Map<String, Value>,
+  ) -> Result<(), Box<EvalAltResult>> {
+    let fields = def.iter().try_fold(
+      IndexMap::new(),
+      |mut map, (field_name, val)| -> Result<_, Box<EvalAltResult>> {
+        match val.as_str() {
+          Some(field_def) => {
+            let type_meta = self.parse_type(field_def)?;
+            map.insert(field_name.to_string(), type_meta);
+            Ok(map)
+          }
+          None => Err(
+            format!(
+              "Expected json string for struct {} field {}: got {:?}",
+              name, field_name, val
+            )
+            .into(),
+          ),
         }
-        None => Err(format!("Expected json string for struct {} field {}: got {:?}", name, field_name, val).into()),
-      }
-    })?;
+      },
+    )?;
     self.insert_meta(name, TypeMeta::Struct(fields));
     Ok(())
   }
@@ -702,7 +762,8 @@ impl Types {
   }
 
   pub fn parse_type(&mut self, name: &str) -> Result<TypeRef, Box<EvalAltResult>> {
-    let name = name.trim()
+    let name = name
+      .trim()
       .replace("\r", "")
       .replace("\n", "")
       .replace("T::", "");
@@ -763,9 +824,7 @@ impl Types {
             };
             Ok(TypeMeta::Result(ok_ref, err_ref))
           }
-          "PhantomData" | "sp_std::marker::PhantomData" => {
-            Ok(TypeMeta::Unit)
-          }
+          "PhantomData" | "sp_std::marker::PhantomData" => Ok(TypeMeta::Unit),
           generic => {
             // Some generic type.
             if self.types.contains_key(generic) {
@@ -788,11 +847,14 @@ impl Types {
               None
             }
           })
-          .try_fold(Vec::new(), |mut vec, val| -> Result<_, Box<EvalAltResult>> {
-            let type_ref = self.parse_type(val)?;
-            vec.push(type_ref);
-            Ok(vec)
-          })?;
+          .try_fold(
+            Vec::new(),
+            |mut vec, val| -> Result<_, Box<EvalAltResult>> {
+              let type_ref = self.parse_type(val)?;
+              vec.push(type_ref);
+              Ok(vec)
+            },
+          )?;
         // Handle tuples.
         Ok(TypeMeta::Tuple(defs))
       }
@@ -802,16 +864,14 @@ impl Types {
           .split_once(';')
           .and_then(|(ty, len)| {
             // parse slice length.
-            len.trim().parse::<usize>().ok()
-              .map(|l| (ty.trim(), l))
-          }).ok_or_else(|| format!("Failed to parse slice: {}", def))?;
+            len.trim().parse::<usize>().ok().map(|l| (ty.trim(), l))
+          })
+          .ok_or_else(|| format!("Failed to parse slice: {}", def))?;
         // Handle slices.
         let slice_ref = self.parse_type(slice_ty)?;
         Ok(TypeMeta::Slice(slice_len, slice_ref))
       }
-      _ => {
-        Ok(TypeMeta::Unresolved(def.into()))
-      }
+      _ => Ok(TypeMeta::Unresolved(def.into())),
     }
   }
 
@@ -836,13 +896,13 @@ impl Types {
         match &*old_meta {
           TypeMeta::Unresolved(_) => {
             *old_meta = TypeMeta::NewType(name.into(), type_ref.clone());
-          },
+          }
           _ => {
             eprintln!("REDEFINE TYPE: {}", name);
           }
         }
         old_ref.clone()
-      },
+      }
       Entry::Vacant(entry) => {
         entry.insert(type_ref.clone());
         type_ref
@@ -870,8 +930,14 @@ impl Types {
     }
   }
 
-  pub fn custom_encode<F>(&mut self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
-    where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
+  pub fn custom_encode<F>(
+    &mut self,
+    name: &str,
+    type_id: TypeId,
+    func: F,
+  ) -> Result<(), Box<EvalAltResult>>
+  where
+    F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
   {
     let func = WrapEncodeFn(Arc::new(func));
     let type_ref = self.parse_type(name)?;
@@ -880,7 +946,8 @@ impl Types {
   }
 
   pub fn custom_decode<F>(&mut self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
-    where F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>
+  where
+    F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>,
   {
     let func = WrapDecodeFn(Arc::new(func));
     let type_ref = self.parse_type(name)?;
@@ -940,15 +1007,22 @@ impl TypeLookup {
     self.types.read().unwrap().dump_unresolved();
   }
 
-  pub fn custom_encode<F>(&self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
-    where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
+  pub fn custom_encode<F>(
+    &self,
+    name: &str,
+    type_id: TypeId,
+    func: F,
+  ) -> Result<(), Box<EvalAltResult>>
+  where
+    F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
   {
     let mut t = self.types.write().unwrap();
     t.custom_encode(name, type_id, func)
   }
 
   pub fn custom_decode<F>(&self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
-    where F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>
+  where
+    F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>,
   {
     let mut t = self.types.write().unwrap();
     t.custom_decode(name, func)
@@ -960,25 +1034,32 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<TypeLookup>("TypeLookup")
     .register_fn("dump_types", TypeLookup::dump_types)
     .register_fn("dump_unresolved", TypeLookup::dump_unresolved)
-    .register_result_fn("parse_named_type", |lookup: &mut TypeLookup, name: &str, def: &str| TypeLookup::parse_named_type(lookup, name, def))
-    .register_result_fn("parse_type", |lookup: &mut TypeLookup, def: &str| TypeLookup::parse_type(lookup, def))
-    .register_result_fn("resolve", |lookup: &mut TypeLookup, name: &str| TypeLookup::resolve(lookup, name))
-
+    .register_result_fn(
+      "parse_named_type",
+      |lookup: &mut TypeLookup, name: &str, def: &str| {
+        TypeLookup::parse_named_type(lookup, name, def)
+      },
+    )
+    .register_result_fn("parse_type", |lookup: &mut TypeLookup, def: &str| {
+      TypeLookup::parse_type(lookup, def)
+    })
+    .register_result_fn("resolve", |lookup: &mut TypeLookup, name: &str| {
+      TypeLookup::resolve(lookup, name)
+    })
     .register_type_with_name::<Types>("Types")
     .register_type_with_name::<TypeMeta>("TypeMeta")
     .register_fn("to_string", TypeMeta::to_string)
-
     .register_type_with_name::<TypeRef>("TypeRef")
     .register_fn("to_string", TypeRef::to_string)
     .register_result_fn("encode", TypeRef::encode)
     .register_result_fn("decode", TypeRef::decode)
-
     .register_type_with_name::<Era>("Era")
     .register_fn("era_immortal", || Era::immortal())
-    .register_fn("era_mortal", |period: i64, current: i64| Era::mortal(period as u64, current as u64))
+    .register_fn("era_mortal", |period: i64, current: i64| {
+      Era::mortal(period as u64, current as u64)
+    })
     .register_fn("encode", |era: &mut Era| era.encode())
-    .register_fn("to_string", |era: &mut Era| format!("{:?}", era))
-    ;
+    .register_fn("to_string", |era: &mut Era| format!("{:?}", era));
 }
 
 pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box<EvalAltResult>> {

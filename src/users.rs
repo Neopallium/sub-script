@@ -7,8 +7,8 @@ use substrate_api_client::Hash;
 
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
-use crate::client::Client;
 use super::metadata::EncodedCall;
+use crate::client::Client;
 
 #[derive(Clone)]
 pub struct User {
@@ -119,7 +119,6 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
     .register_result_fn("submit", User::submit_call)
-
     .register_type_with_name::<Account>("Account")
     .register_fn("to_string", Account::to_string)
     .register_type_with_name::<Users>("Users")
