@@ -8,7 +8,9 @@ use std::convert::TryFrom;
 use serde_json::{
   Value, Map,
 };
-use parity_scale_codec::{Compact, Input, Decode, Error as PError};
+use parity_scale_codec::{Compact, Input, Decode, Encode, Error as PError};
+
+use sp_runtime::generic::Era;
 
 use rust_decimal::{Decimal, prelude::ToPrimitive};
 
@@ -20,6 +22,93 @@ use indexmap::map::IndexMap;
 use super::users::User;
 use super::metadata::EncodedArgs;
 
+pub type EncodeFn = dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>;
+#[derive(Clone)]
+pub struct WrapEncodeFn(Arc<EncodeFn>);
+
+impl WrapEncodeFn {
+  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+    self.0(value, data)
+  }
+}
+
+pub struct BoxedInput<'a>(Box<&'a mut dyn Input>);
+
+impl<'a> BoxedInput<'a> {
+  pub fn new(input: &'a mut dyn Input) -> Self {
+    let boxed = Box::new(input);
+    Self(boxed)
+  }
+}
+
+impl<'a> Input for BoxedInput<'a> {
+  fn remaining_len(&mut self) -> Result<Option<usize>, PError> {
+    self.0.remaining_len()
+  }
+
+  fn read(&mut self, into: &mut [u8]) -> Result<(), PError> {
+    self.0.read(into)
+  }
+}
+
+pub type DecodeFn = dyn Fn(BoxedInput) -> Result<Dynamic, PError>;
+#[derive(Clone)]
+pub struct WrapDecodeFn(Arc<DecodeFn>);
+
+impl WrapDecodeFn {
+  pub fn decode_value<I: Input>(&self, input: &mut I) -> Result<Dynamic, PError> {
+    let boxed = BoxedInput::new(input);
+    self.0(boxed)
+  }
+}
+
+#[derive(Clone)]
+pub struct CustomType {
+  encode_map: HashMap<TypeId, WrapEncodeFn>,
+  decode: Option<WrapDecodeFn>,
+  type_meta: Box<TypeMeta>,
+}
+
+impl std::fmt::Debug for CustomType {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_fmt(format_args!("CustomType({:?})", self.type_meta))
+  }
+}
+
+impl CustomType {
+  pub fn new(type_meta: TypeMeta) -> Self {
+    Self {
+      encode_map: Default::default(),
+      decode: None,
+      type_meta: Box::new(type_meta),
+    }
+  }
+
+  pub fn custom_encode(&mut self, type_id: TypeId, func: WrapEncodeFn) {
+    self.encode_map.insert(type_id, func);
+  }
+
+  pub fn custom_decode(&mut self, func: WrapDecodeFn) {
+    self.decode = Some(func);
+  }
+
+  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+    let type_id = value.type_id();
+    if let Some(func) = self.encode_map.get(&type_id) {
+      func.encode_value(value, data)
+    } else {
+      self.type_meta.encode_value(value, data)
+    }
+  }
+
+  pub fn decode_value<I: Input>(&self, input: &mut I, _is_compact: bool) -> Result<Dynamic, PError> {
+    match &self.decode {
+      Some(func) => func.decode_value(input),
+      None => self.type_meta.decode_value(input, false)
+    }
+  }
+}
+
 #[derive(Clone)]
 pub struct TypeRef(Arc<RwLock<TypeMeta>>);
 
@@ -28,18 +117,26 @@ impl TypeRef {
     format!("TypeRef: {:?}", self.0.read().unwrap())
   }
 
-  pub fn custom_encode<F>(&self, type_id: TypeId, func: F)
-    where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
-  {
+  pub fn custom_encode(&self, type_id: TypeId, func: WrapEncodeFn) {
     self.0.write().unwrap().custom_encode(type_id, func)
   }
 
-  pub fn encode_value(&self, param: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
-    self.0.read().unwrap().encode_value(param, data)
+  pub fn custom_decode(&self, func: WrapDecodeFn) {
+    self.0.write().unwrap().custom_decode(func)
+  }
+
+  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+    self.0.read().unwrap().encode_value(value, data)
   }
 
   pub fn decode_value<I: Input>(&self, input: &mut I, is_compact: bool) -> Result<Dynamic, PError> {
     self.0.read().unwrap().decode_value(input, is_compact)
+  }
+
+  pub fn encode(&mut self, value: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+    let mut data = EncodedArgs::new();
+    self.encode_value(value, &mut data)?;
+    Ok(data.into_inner())
   }
 
   pub fn decode(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -60,22 +157,6 @@ impl std::fmt::Debug for TypeRef {
       TypeMeta::NewType(name, _) => f.write_fmt(format_args!("NewType({})", name)),
       _ => meta.fmt(f),
     }
-  }
-}
-
-pub type EncodeFn = dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>;
-#[derive(Clone)]
-pub struct WrapEncodeFn(Arc<EncodeFn>);
-
-impl WrapEncodeFn {
-  pub fn encode_value(&self, value: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
-    self.0(value, data)
-  }
-}
-
-impl std::fmt::Debug for WrapEncodeFn {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    f.write_str("EncodeFunction")
   }
 }
 
@@ -106,7 +187,7 @@ pub enum TypeMeta {
 
   Unresolved(String),
 
-  CustomEncode(HashMap<TypeId, WrapEncodeFn>, Box<TypeMeta>),
+  CustomType(CustomType),
 }
 
 impl Default for TypeMeta {
@@ -120,26 +201,33 @@ impl TypeMeta {
     format!("TypeMeta: {:?}", self)
   }
 
-  fn make_custom_encode(&mut self) {
+  fn make_custom_type(&mut self) {
     match self {
-      TypeMeta::CustomEncode(_, _) => {
+      TypeMeta::CustomType(_) => {
         // already wrapped.
         return;
       }
       _ => (),
     }
     let meta = self.clone();
-    *self = TypeMeta::CustomEncode(Default::default(), Box::new(meta));
+    *self = TypeMeta::CustomType(CustomType::new(meta));
   }
 
-  pub fn custom_encode<F>(&mut self, type_id: TypeId, func: F)
-    where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
-  {
-    self.make_custom_encode();
+  pub fn custom_encode(&mut self, type_id: TypeId, func: WrapEncodeFn) {
+    self.make_custom_type();
     match self {
-      TypeMeta::CustomEncode(type_map, _) => {
-        let func = WrapEncodeFn(Arc::new(func));
-        type_map.insert(type_id, func);
+      TypeMeta::CustomType(custom) => {
+        custom.custom_encode(type_id, func);
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  pub fn custom_decode(&mut self, func: WrapDecodeFn) {
+    self.make_custom_type();
+    match self {
+      TypeMeta::CustomType(custom) => {
+        custom.custom_decode(func);
       }
       _ => unreachable!(),
     }
@@ -326,13 +414,8 @@ impl TypeMeta {
         type_ref.encode_value(value, data)?
       },
 
-      TypeMeta::CustomEncode(type_map, type_meta) => {
-        let type_id = value.type_id();
-        if let Some(func) = type_map.get(&type_id) {
-          func.encode_value(value, data)?
-        } else {
-          type_meta.encode_value(value, data)?
-        }
+      TypeMeta::CustomType(custom) => {
+        custom.encode_value(value, data)?
       },
       TypeMeta::Unresolved(type_def) => {
         Err(format!("Unresolved type: {}", type_def))?
@@ -496,8 +579,8 @@ impl TypeMeta {
         type_ref.decode_value(input, false)?
       },
 
-      TypeMeta::CustomEncode(_type_map, type_meta) => {
-        type_meta.decode_value(input, false)?
+      TypeMeta::CustomType(custom) => {
+        custom.decode_value(input, false)?
       },
       TypeMeta::Unresolved(type_def) => {
         eprintln!("Unresolved type: {}", type_def);
@@ -787,11 +870,21 @@ impl Types {
     }
   }
 
-  pub fn custom_encode_type<F>(&mut self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
+  pub fn custom_encode<F>(&mut self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
     where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
   {
+    let func = WrapEncodeFn(Arc::new(func));
     let type_ref = self.parse_type(name)?;
     type_ref.custom_encode(type_id, func);
+    Ok(())
+  }
+
+  pub fn custom_decode<F>(&mut self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
+    where F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>
+  {
+    let func = WrapDecodeFn(Arc::new(func));
+    let type_ref = self.parse_type(name)?;
+    type_ref.custom_decode(func);
     Ok(())
   }
 }
@@ -847,11 +940,18 @@ impl TypeLookup {
     self.types.read().unwrap().dump_unresolved();
   }
 
-  pub fn custom_encode_type<F>(&self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
+  pub fn custom_encode<F>(&self, name: &str, type_id: TypeId, func: F) -> Result<(), Box<EvalAltResult>>
     where F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>
   {
     let mut t = self.types.write().unwrap();
-    t.custom_encode_type(name, type_id, func)
+    t.custom_encode(name, type_id, func)
+  }
+
+  pub fn custom_decode<F>(&self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
+    where F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>
+  {
+    let mut t = self.types.write().unwrap();
+    t.custom_decode(name, func)
   }
 }
 
@@ -863,12 +963,21 @@ pub fn init_engine(engine: &mut Engine) {
     .register_result_fn("parse_named_type", |lookup: &mut TypeLookup, name: &str, def: &str| TypeLookup::parse_named_type(lookup, name, def))
     .register_result_fn("parse_type", |lookup: &mut TypeLookup, def: &str| TypeLookup::parse_type(lookup, def))
     .register_result_fn("resolve", |lookup: &mut TypeLookup, name: &str| TypeLookup::resolve(lookup, name))
+
     .register_type_with_name::<Types>("Types")
     .register_type_with_name::<TypeMeta>("TypeMeta")
     .register_fn("to_string", TypeMeta::to_string)
+
     .register_type_with_name::<TypeRef>("TypeRef")
     .register_fn("to_string", TypeRef::to_string)
+    .register_result_fn("encode", TypeRef::encode)
     .register_result_fn("decode", TypeRef::decode)
+
+    .register_type_with_name::<Era>("Era")
+    .register_fn("era_immortal", || Era::immortal())
+    .register_fn("era_mortal", |period: i64, current: i64| Era::mortal(period as u64, current as u64))
+    .register_fn("encode", |era: &mut Era| era.encode())
+    .register_fn("to_string", |era: &mut Era| format!("{:?}", era))
     ;
 }
 
@@ -896,19 +1005,28 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
   types.load_schema(schema)?;
 
   // Custom encodings.
-  types.custom_encode_type("AccountId", TypeId::of::<User>(), |value, data| {
+  types.custom_encode("Era", TypeId::of::<Era>(), |value, data| {
+    let era = value.cast::<Era>();
+    data.encode(era);
+    Ok(())
+  })?;
+  types.custom_decode("Era", |mut input| {
+    let era = Era::decode(&mut input)?;
+    Ok(Dynamic::from(era))
+  })?;
+  types.custom_encode("AccountId", TypeId::of::<User>(), |value, data| {
     let user = value.cast::<User>();
     data.encode(user.public());
     Ok(())
   })?;
-  types.custom_encode_type("MultiAddress", TypeId::of::<User>(), |value, data| {
+  types.custom_encode("MultiAddress", TypeId::of::<User>(), |value, data| {
     let user = value.cast::<User>();
     // Encode variant idx.
     data.encode(0u8); // MultiAddress::Id
     data.encode(user.public());
     Ok(())
   })?;
-  types.custom_encode_type("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
+  types.custom_encode("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
     let value = value.cast::<ImmutableString>();
     if value.len() == 12 {
       data.encode(value.as_str());

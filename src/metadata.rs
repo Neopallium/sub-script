@@ -687,7 +687,7 @@ pub fn init_scope(url: &str, lookup: &TypeLookup, engine: &mut Engine, scope: &m
   let metadata = Metadata::new(url, lookup)?;
   scope.push_constant("METADATA", metadata.clone());
 
-  lookup.custom_encode_type("Call", TypeId::of::<EncodedCall>(), |value, data| {
+  lookup.custom_encode("Call", TypeId::of::<EncodedCall>(), |value, data| {
     let call = value.cast::<EncodedCall>();
     data.encode(call);
     Ok(())
