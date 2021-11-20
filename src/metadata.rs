@@ -468,6 +468,10 @@ impl EncodedArgs {
   fn to_string(&mut self) -> String {
     format!("0x{}", hex::encode(&self.data))
   }
+
+  pub fn into_inner(self) -> Vec<u8> {
+    self.data
+  }
 }
 
 impl Encode for EncodedArgs {
