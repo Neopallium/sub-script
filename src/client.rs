@@ -22,7 +22,7 @@ pub struct InnerClient {
 
 impl InnerClient {
   pub fn from_api(api: Api<Pair>) -> Arc<RwLock<Self>> {
-    let nonce = api.get_nonce().saturating_sub(1);
+    let nonce = api.get_nonce();
     Arc::new(RwLock::new(Self {
       api,
       nonce,
@@ -50,13 +50,13 @@ impl InnerClient {
   }
 
   pub fn submit_call(&mut self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
-    let mut nonce = self.nonce;
+    let mut next_nonce = self.nonce;
     let xt = if let Some(signer) = &self.api.signer {
-      nonce += 1;
+      next_nonce += 1;
       compose_extrinsic_offline(
         signer,
         call.into_call(),
-        nonce,
+        self.nonce,
         Era::Immortal,
         self.api.genesis_hash,
         self.api.genesis_hash,
@@ -72,7 +72,7 @@ impl InnerClient {
     let hash = self.api.send_extrinsic(xt, XtStatus::InBlock)
       .map_err(|e| e.to_string())?;
 
-    self.nonce = nonce;
+    self.nonce = next_nonce;
     /*
     if let Some(hash) = hash {
       let events = self.api.get_storage_value("System", "Events", Some(hash))
