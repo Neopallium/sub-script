@@ -26,7 +26,6 @@ It uses [Rhai](https://rhai.rs) for the scripting engine.
 - Get storage values.
 - Better interface for getting events.
 - Replace/fix current `substrate-api-client` crate.
-- Use a shared pool of client/connects to node.  (right now each user has a client connection)
 - Add hook to auto-initialize new users (to support mocking cdd registration).
 - Add REPL support for quickly making extrinsic calls.
 - Support multiple `Engine` instances with shared User state (for nonces).  This will allow spawning sub-tasks for load testing.

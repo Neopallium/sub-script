@@ -5,8 +5,6 @@ print("Batching: Mock CDD");
 // Use Alice for mocking cdd.
 let alice = USER.Alice;
 
-let api = alice.connect("ws://127.0.0.1:9944");
-
 let event_ty = Types.resolve("EventRecords");
 print(`event_ty = ${event_ty}`);
 
@@ -31,7 +29,7 @@ for (user, idx) in users {
 let block = alice.submit(Utility.batch_atomic(calls));
 print(`block = ${block}`);
 
-let raw_events = api.get_storage_value("System", "Events", block);
+let raw_events = CLIENT.get_storage_value("System", "Events", block);
 print(`raw_events = ${raw_events}`);
 // */
 

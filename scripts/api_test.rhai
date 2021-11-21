@@ -6,8 +6,7 @@ print("Test Client API");
 let user = USER.Alice;
 print(`User: ${user}`);
 
-let api = user.connect("ws://127.0.0.1:9944");
-//api.print_metadata();
+//CLIENT.print_metadata();
 
 /*
 let pallet = METADATA.Balances;

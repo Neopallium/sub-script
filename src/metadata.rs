@@ -13,7 +13,8 @@ use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope};
 
 use indexmap::map::IndexMap;
 
-use super::types::{TypeLookup, TypeMeta, TypeRef};
+use crate::client::Client;
+use crate::types::{TypeLookup, TypeMeta, TypeRef};
 
 fn decode<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
@@ -30,9 +31,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
-  pub fn new(url: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
-    let client = crate::client::Client::connect(url)?;
-
+  pub fn new(client: &Client, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     // Get runtime metadata.
     let metadata_prefixed = client.get_metadata()?;
 
@@ -728,12 +727,12 @@ pub fn init_engine(engine: &mut Engine) {
 }
 
 pub fn init_scope(
-  url: &str,
+  client: &Client,
   lookup: &TypeLookup,
   engine: &mut Engine,
   scope: &mut Scope<'_>,
 ) -> Result<Metadata, Box<EvalAltResult>> {
-  let metadata = Metadata::new(url, lookup)?;
+  let metadata = Metadata::new(client, lookup)?;
   scope.push_constant("METADATA", metadata.clone());
 
   lookup.custom_encode("Call", TypeId::of::<EncodedCall>(), |value, data| {
