@@ -50,9 +50,9 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
   metadata::init_engine(&mut engine);
 
   // Initialize scope with some globals.
-  let client = client::init_scope(url, &mut scope)?;
-  users::init_scope(&client, &mut scope);
   let lookup = types::init_scope(&schema, &mut scope)?;
+  let client = client::init_scope(url, &lookup, &mut scope)?;
+  users::init_scope(&client, &mut scope);
   metadata::init_scope(&client, &lookup, &mut engine, &mut scope)?;
 
   Ok((engine, scope))

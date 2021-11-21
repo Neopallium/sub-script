@@ -10,16 +10,19 @@ use substrate_api_client::{Api, Hash, StorageValue};
 
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
-use crate::metadata::EncodedCall;
 use crate::users::User;
+use crate::types::{TypeLookup, TypeRef};
+use crate::metadata::EncodedCall;
 
 pub struct InnerClient {
   api: Api<Pair>,
+  event_records: TypeRef,
 }
 
 impl InnerClient {
-  pub fn from_api(api: Api<Pair>) -> Arc<RwLock<Self>> {
-    Arc::new(RwLock::new(Self { api }))
+  pub fn new(api: Api<Pair>, lookup: &TypeLookup) -> Arc<RwLock<Self>> {
+    let event_records = lookup.resolve("EventRecords");
+    Arc::new(RwLock::new(Self { api, event_records }))
   }
 
   pub fn check_url(&self, url: &str) -> bool {
@@ -52,6 +55,16 @@ impl InnerClient {
     )
   }
 
+  pub fn get_events(&self, block: Option<Hash>, _xthex: Option<&str>) -> Result<Dynamic, Box<EvalAltResult>> {
+    match self.get_storage_value("System", "Events", block)? {
+      Some(value) => {
+        let data = Vec::from(&*value);
+        Ok(self.event_records.decode(data)?)
+      }
+      None => Ok(Dynamic::UNIT),
+    }
+  }
+
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
     let nonce = self
       .api
@@ -61,11 +74,21 @@ impl InnerClient {
     Ok(nonce)
   }
 
+  fn submit(&self, xthex: String) -> Result<Option<(Hash, String)>, Box<EvalAltResult>> {
+    let res = self
+      .api
+      .send_extrinsic(xthex.clone(), XtStatus::InBlock)
+      .map_err(|e| e.to_string())?
+      .map(|hash| (hash, xthex));
+
+    Ok(res)
+  }
+
   pub fn submit_call(
     &self,
     user: &User,
     call: EncodedCall,
-  ) -> Result<Option<Hash>, Box<EvalAltResult>> {
+  ) -> Result<Option<(Hash, String)>, Box<EvalAltResult>> {
     let xthex = compose_extrinsic_offline(
       &user.pair,
       call.into_call(),
@@ -78,26 +101,17 @@ impl InnerClient {
     )
     .hex_encode();
 
-    let hash = self
-      .api
-      .send_extrinsic(xthex, XtStatus::InBlock)
-      .map_err(|e| e.to_string())?;
-
-    Ok(hash)
+    self.submit(xthex)
   }
 
-  pub fn submit_unsigned(&self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
+  pub fn submit_unsigned(&self, call: EncodedCall) -> Result<Option<(Hash, String)>, Box<EvalAltResult>> {
     let xthex = (UncheckedExtrinsicV4 {
       signature: None,
       function: call.into_call(),
     })
     .hex_encode();
-    let hash = self
-      .api
-      .send_extrinsic(xthex, XtStatus::InBlock)
-      .map_err(|e| e.to_string())?;
 
-    Ok(hash)
+    self.submit(xthex)
   }
 }
 
@@ -107,10 +121,10 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn connect(url: &str) -> Result<Self, Box<EvalAltResult>> {
+  pub fn connect(url: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let api = Api::new(url.into()).map_err(|e| e.to_string())?;
     Ok(Self {
-      inner: InnerClient::from_api(api),
+      inner: InnerClient::new(api, lookup),
     })
   }
 
@@ -146,24 +160,90 @@ impl Client {
     }
   }
 
+  pub fn get_events(&self, block: Option<Hash>, xthex: Option<&str>) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_events(block, xthex)
+  }
+
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_nonce(account)
   }
 
-  pub fn submit_call(
-    &self,
-    user: &User,
-    call: EncodedCall,
-  ) -> Result<Option<Hash>, Box<EvalAltResult>> {
+  pub fn submit_call(&self, user: &User, call: EncodedCall) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     self.inner.read().unwrap().submit_call(user, call)
+      .map(|res| ExtrinsicCallResult::new(self, res))
   }
 
-  pub fn submit_unsigned(&self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
+  pub fn submit_unsigned(&self, call: EncodedCall) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     self.inner.read().unwrap().submit_unsigned(call)
+      .map(|res| ExtrinsicCallResult::new(self, res))
   }
 
   pub fn inner(&self) -> Arc<RwLock<InnerClient>> {
     self.inner.clone()
+  }
+}
+
+#[derive(Clone)]
+pub struct BlockRef {
+  client: Client,
+  block: Hash,
+}
+
+impl BlockRef {
+  pub fn new(client: &Client, block: Hash) -> Self {
+    Self {
+      client: client.clone(),
+      block,
+    }
+  }
+
+  pub fn events(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.get_events(None)
+  }
+
+  pub fn get_events(&self, xthex: Option<&str>) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.client.get_events(Some(self.block), xthex)
+  }
+
+  pub fn to_string(&mut self) -> String {
+    format!("Block: {:?}", self.block)
+  }
+}
+
+#[derive(Clone)]
+pub enum ExtrinsicCallResult {
+  NoBlock,
+  InBlock(BlockRef, String),
+}
+
+impl ExtrinsicCallResult {
+  pub fn new(client: &Client, res: Option<(Hash, String)>) -> Self {
+    match res {
+      Some((block, xthex)) => Self::InBlock(BlockRef::new(client, block), xthex),
+      None => Self::NoBlock,
+    }
+  }
+
+  pub fn events(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
+    use ExtrinsicCallResult::*;
+    let events =match self {
+      NoBlock => Dynamic::UNIT,
+      InBlock(block, xthex) => Dynamic::from(block.get_events(Some(xthex))?),
+    };
+
+    Ok(events)
+  }
+
+  pub fn to_string(&mut self) -> String {
+    use ExtrinsicCallResult::*;
+    match self {
+      NoBlock => {
+        format!("NoBlock")
+      }
+      InBlock(block, _xthex) => {
+        format!("InBlock: {:?}", block.block)
+      }
+    }
   }
 }
 
@@ -172,11 +252,20 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<Client>("Client")
     .register_result_fn("get_storage_value", Client::get_storage_value)
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
-    .register_fn("print_metadata", Client::print_metadata);
+    .register_fn("print_metadata", Client::print_metadata)
+
+    .register_type_with_name::<BlockRef>("BlockRef")
+    .register_result_fn("events", BlockRef::events)
+    .register_fn("to_string", BlockRef::to_string)
+
+    .register_type_with_name::<ExtrinsicCallResult>("ExtrinsicCallResult")
+    .register_result_fn("events", ExtrinsicCallResult::events)
+    .register_fn("to_string", ExtrinsicCallResult::to_string)
+    ;
 }
 
-pub fn init_scope(url: &str, scope: &mut Scope<'_>) -> Result<Client, Box<EvalAltResult>> {
-  let client = Client::connect(url)?;
+pub fn init_scope(url: &str, lookup: &TypeLookup, scope: &mut Scope<'_>) -> Result<Client, Box<EvalAltResult>> {
+  let client = Client::connect(url, lookup)?;
   scope.push_constant("CLIENT", client.clone());
 
   Ok(client)

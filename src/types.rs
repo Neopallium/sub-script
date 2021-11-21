@@ -145,18 +145,26 @@ impl TypeRef {
     self.0.read().unwrap().decode_value(input, is_compact)
   }
 
-  pub fn encode(&mut self, value: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+  pub fn encode(&self, value: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
     let mut data = EncodedArgs::new();
     self.encode_value(value, &mut data)?;
     Ok(data.into_inner())
   }
 
-  pub fn decode(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
+  pub fn decode(&self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
     Ok(
       self
         .decode_value(&mut &data[..], false)
         .map_err(|e| e.to_string())?,
     )
+  }
+
+  pub fn encode_mut(&mut self, value: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+    self.encode(value)
+  }
+
+  pub fn decode_mut(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.decode(data)
   }
 }
 
@@ -766,7 +774,7 @@ impl Types {
       .replace("\n", "")
       .replace("T::", "");
     // Try to resolve the type.
-    let type_ref = self.resolve(&name)?;
+    let type_ref = self.resolve(&name);
     let mut type_meta = type_ref.0.write().unwrap();
 
     // Check if type is unresolved.
@@ -826,7 +834,7 @@ impl Types {
           generic => {
             // Some generic type.
             if self.types.contains_key(generic) {
-              Ok(TypeMeta::NewType(generic.into(), self.resolve(generic)?))
+              Ok(TypeMeta::NewType(generic.into(), self.resolve(generic)))
             } else {
               Ok(TypeMeta::Unresolved(def.into()))
             }
@@ -873,10 +881,10 @@ impl Types {
     }
   }
 
-  pub fn resolve(&mut self, name: &str) -> Result<TypeRef, Box<EvalAltResult>> {
+  pub fn resolve(&mut self, name: &str) -> TypeRef {
     let entry = self.types.entry(name.into());
     let type_ref = entry.or_insert_with(|| TypeRef::from(TypeMeta::Unresolved(name.into())));
-    Ok(type_ref.clone())
+    type_ref.clone()
   }
 
   pub fn insert_meta(&mut self, name: &str, type_def: TypeMeta) -> TypeRef {
@@ -982,9 +990,9 @@ impl TypeLookup {
     t.parse_type(def)
   }
 
-  pub fn resolve(&self, name: &str) -> Result<TypeRef, Box<EvalAltResult>> {
+  pub fn resolve(&self, name: &str) -> TypeRef {
     let mut t = self.types.write().unwrap();
-    Ok(t.resolve(name)?)
+    t.resolve(name)
   }
 
   pub fn insert_meta(&self, name: &str, type_meta: TypeMeta) -> TypeRef {
@@ -1041,7 +1049,7 @@ pub fn init_engine(engine: &mut Engine) {
     .register_result_fn("parse_type", |lookup: &mut TypeLookup, def: &str| {
       TypeLookup::parse_type(lookup, def)
     })
-    .register_result_fn("resolve", |lookup: &mut TypeLookup, name: &str| {
+    .register_fn("resolve", |lookup: &mut TypeLookup, name: &str| {
       TypeLookup::resolve(lookup, name)
     })
     .register_type_with_name::<Types>("Types")
@@ -1049,8 +1057,8 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("to_string", TypeMeta::to_string)
     .register_type_with_name::<TypeRef>("TypeRef")
     .register_fn("to_string", TypeRef::to_string)
-    .register_result_fn("encode", TypeRef::encode)
-    .register_result_fn("decode", TypeRef::decode)
+    .register_result_fn("encode", TypeRef::encode_mut)
+    .register_result_fn("decode", TypeRef::decode_mut)
     .register_type_with_name::<Era>("Era")
     .register_fn("era_immortal", || Era::immortal())
     .register_fn("era_mortal", |period: i64, current: i64| {

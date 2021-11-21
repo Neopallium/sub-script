@@ -3,12 +3,10 @@ use std::collections::HashMap;
 use sp_core::{sr25519, Pair};
 use sp_runtime::AccountId32;
 
-use substrate_api_client::Hash;
-
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
-use super::metadata::EncodedCall;
-use crate::client::Client;
+use crate::client::{Client, ExtrinsicCallResult};
+use crate::metadata::EncodedCall;
 
 pub type AccountId = AccountId32;
 
@@ -37,16 +35,6 @@ impl User {
     })
   }
 
-  pub fn connect(&mut self, url: &str) -> Result<Client, Box<EvalAltResult>> {
-    if self.client.check_url(url) {
-      // Same url, just clone the client.
-      return Ok(self.client.clone());
-    }
-    let client = Client::connect(url)?;
-    self.client = client.clone();
-    Ok(client)
-  }
-
   pub fn public(&self) -> sr25519::Public {
     self.pair.public()
   }
@@ -59,13 +47,13 @@ impl User {
     hex::encode(&self.pair.to_raw_vec())
   }
 
-  pub fn submit_call(&mut self, call: EncodedCall) -> Result<Option<Hash>, Box<EvalAltResult>> {
-    let hash = self.client.submit_call(self, call)?;
+  pub fn submit_call(&mut self, call: EncodedCall) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+    let res = self.client.submit_call(self, call)?;
 
     // Only update the nonce if the extrinsic executed.
     self.nonce += 1;
 
-    Ok(hash)
+    Ok(res)
   }
 
   fn to_string(&mut self) -> String {
@@ -106,7 +94,6 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<User>("User")
     .register_get("acc", User::acc)
     .register_get("seed", User::seed)
-    .register_result_fn("connect", User::connect)
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
     .register_result_fn("submit", User::submit_call)

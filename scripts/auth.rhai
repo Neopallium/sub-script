@@ -7,7 +7,7 @@ let alice = USER.Alice;
 let user = USER.Test123;
 let key = USER.Key1;
 
-//*
+/*
 // Mock Cdd for user and make sure they have POLYX.
 alice.submit(TestUtils.mock_cdd_register_did(user));
 alice.submit(Balances.transfer(user, 5.0));
@@ -15,19 +15,21 @@ alice.submit(Balances.transfer(user, 5.0));
 
 //*
 // Add JoinIdentity authorization for `key` to join `user`.
-let block = user.submit(Identity.add_authorization(#{
+let res = user.submit(Identity.add_authorization(#{
 	Account: key
 }, #{
 	JoinIdentity: #{
 		asset: #{ These: ["ACME"] },
+		//asset: #{ Whole: () },
 		extrinsic: #{ Whole: () },
 		portfolio: #{ Whole: () },
 	}
 }, ()));
-print(`block = ${block}`);
+print(`call result = ${res}`);
+print(`events = ${res.events()}`);
 // */
 
-//*
+/*
 let removed = 0;
 // Try removing auth_ids 100 to 150 for `key`.
 for auth_id in range(100, 150) {
