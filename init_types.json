@@ -39,8 +39,7 @@
   },
   "DispatchErrorModule": {
     "index": "u8",
-    "error": "u8",
-    "message": "Option<Text>"
+    "error": "u8"
   },
   "TokenError": {
     "_enum": ["NoFunds", "WouldDie", "BelowMinimum", "CannotCreate", "UnknownAsset", "Frozen", "Unsupported"]
@@ -50,7 +49,7 @@
   },
   "DispatchError": {
     "_enum": {
-      "Other": "Text",
+      "Other": "",
       "CannotLookup": "",
       "BadOrigin": "",
       "Module": "DispatchErrorModule",

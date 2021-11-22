@@ -11,10 +11,8 @@ use parity_scale_codec::{Encode, Output};
 use rhai::plugin::NativeCallContext;
 use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope};
 
-use indexmap::map::IndexMap;
-
 use crate::client::Client;
-use crate::types::{TypeLookup, TypeMeta, TypeRef};
+use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
 
 fn decode<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
@@ -59,7 +57,7 @@ impl Metadata {
     };
 
     // Top-level event type.
-    let mut mod_events = IndexMap::new();
+    let mut mod_events = EnumVariants::new();
 
     // Decode module metadata.
     decode(&md.modules)?
@@ -67,7 +65,7 @@ impl Metadata {
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
         let m = ModuleMetadata::decode(m, lookup)?;
         let name = m.name.clone();
-        mod_events.insert(name.clone(), m.event_ref.clone());
+        mod_events.insert_at(m.index, &name, m.event_ref.clone());
         api_md.modules.insert(name, m);
         Ok(())
       })?;
@@ -163,14 +161,14 @@ impl ModuleMetadata {
     // Decode module events.
     if let Some(events) = &md.event {
       // Module RawEvent type.
-      let mut raw_events = IndexMap::new();
+      let mut raw_events = EnumVariants::new();
 
       decode(events)?.iter().enumerate().try_for_each(
         |(event_idx, md)| -> Result<(), Box<EvalAltResult>> {
           let (event, ty_ref) =
             EventMetadata::decode(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
           let name = event.name.clone();
-          raw_events.insert(name.clone(), ty_ref);
+          raw_events.insert_at(event.event_idx, &name, ty_ref);
           module.events.insert(name, event);
           Ok(())
         },

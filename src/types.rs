@@ -20,6 +20,55 @@ use indexmap::map::IndexMap;
 use super::metadata::EncodedArgs;
 use super::users::User;
 
+#[derive(Clone, Debug, Default)]
+pub struct EnumVariant {
+  idx: u8,
+  name: String,
+  type_ref: Option<TypeRef>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EnumVariants {
+  variants: Vec<Option<EnumVariant>>,
+  name_map: HashMap<String, u8>,
+}
+
+impl EnumVariants {
+  pub fn new() -> Self {
+    Default::default()
+  }
+
+  pub fn insert_at(&mut self, idx: u8, name: &str, type_ref: Option<TypeRef>) {
+    let len = idx as usize;
+    while len > self.variants.len() {
+      self.variants.push(None);
+    }
+    let insert_idx = self.insert(name, type_ref);
+    assert!(insert_idx == idx);
+  }
+
+  pub fn insert(&mut self, name: &str, type_ref: Option<TypeRef>) -> u8 {
+    let idx = self.variants.len() as u8;
+    self.variants.push(Some(EnumVariant {
+      idx,
+      name: name.into(),
+      type_ref,
+    }));
+    self.name_map.insert(name.into(), idx);
+    idx
+  }
+
+  pub fn get_by_idx(&self, idx: u8) -> Option<&EnumVariant> {
+    self.variants.get(idx as usize)
+      .and_then(|v| v.as_ref())
+  }
+
+  pub fn get_by_name(&self, name: &str) -> Option<&EnumVariant> {
+    self.name_map.get(name)
+      .and_then(|idx| self.get_by_idx(*idx))
+  }
+}
+
 #[derive(Clone)]
 pub struct WrapEncodeFn(Arc<dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>>);
 
@@ -204,7 +253,7 @@ pub enum TypeMeta {
 
   Tuple(Vec<TypeRef>),
   Struct(IndexMap<String, TypeRef>),
-  Enum(IndexMap<String, Option<TypeRef>>),
+  Enum(EnumVariants),
 
   Compact(TypeRef),
   NewType(String, TypeRef),
@@ -446,15 +495,15 @@ impl TypeMeta {
           let map = value.cast::<RMap>();
           let mut encoded = false;
           for (name, value) in map.into_iter() {
-            if let Some((idx, _, type_ref)) = variants.get_full(name.as_str()) {
+            if let Some(variant) = variants.get_by_name(name.as_str()) {
               if encoded {
                 // Only allow encoding one Enum variant.
                 Err(format!("Can't encode multiple Enum variants."))?;
               }
               encoded = true;
               // Encode enum variant idx.
-              data.encode(idx as u8);
-              if let Some(type_ref) = type_ref {
+              data.encode(variant.idx);
+              if let Some(type_ref) = &variant.type_ref {
                 type_ref.encode_value(value, data)?;
               }
             } else {
@@ -593,28 +642,31 @@ impl TypeMeta {
       TypeMeta::Struct(fields) => {
         let mut map = RMap::new();
         for (name, type_ref) in fields {
+          log::debug!("decode Struct field: {}", name);
           map.insert(name.into(), type_ref.decode_value(input, false)?);
         }
         Dynamic::from(map)
       }
       TypeMeta::Enum(variants) => {
         let val = input.read_byte()?;
-        match variants.get_index(val as usize) {
-          Some((key, Some(type_ref))) => {
+        match variants.get_by_idx(val) {
+          Some(variant) => {
+            let name = &variant.name;
+            log::debug!("decode Enum variant: {}", name);
             let mut map = RMap::new();
-            map.insert(key.into(), type_ref.decode_value(input, false)?);
-            Dynamic::from(map)
-          }
-          Some((key, None)) => {
-            let mut map = RMap::new();
-            map.insert(key.into(), Dynamic::UNIT);
+            if let Some(type_ref) = &variant.type_ref {
+              map.insert(name.into(), type_ref.decode_value(input, false)?);
+            } else {
+              map.insert(name.into(), Dynamic::UNIT);
+            }
             Dynamic::from(map)
           }
           None => {
-            eprintln!(
-              "invalid variant: {}, remaining: {:?}",
+            log::debug!(
+              "invalid variant: {}, remaining: {:?}, variants={:?}",
               val,
-              input.remaining_len()?
+              input.remaining_len()?,
+              variants
             );
             Err("Error decoding Enum, invalid variant.")?
           }
@@ -628,7 +680,7 @@ impl TypeMeta {
 
       TypeMeta::CustomType(custom) => custom.decode_value(input, false)?,
       TypeMeta::Unresolved(type_def) => {
-        eprintln!("Unresolved type: {}", type_def);
+        log::error!("Unresolved type: {}", type_def);
         Err("Unresolved type")?
       }
     };
@@ -693,10 +745,10 @@ impl Types {
       Value::Array(arr) => {
         let variants = arr
           .iter()
-          .try_fold(IndexMap::new(), |mut map, val| match val.as_str() {
+          .try_fold(EnumVariants::new(), |mut variants, val| match val.as_str() {
             Some(name) => {
-              map.insert(name.to_string(), None);
-              Ok(map)
+              variants.insert(name, None);
+              Ok(variants)
             }
             None => Err(format!(
               "Expected json string for enum {}: got {:?}",
@@ -707,17 +759,17 @@ impl Types {
       }
       Value::Object(obj) => {
         let variants = obj.iter().try_fold(
-          IndexMap::new(),
-          |mut map, (var_name, val)| -> Result<_, Box<EvalAltResult>> {
+          EnumVariants::new(),
+          |mut variants, (var_name, val)| -> Result<_, Box<EvalAltResult>> {
             match val.as_str() {
               Some("") => {
-                map.insert(var_name.to_string(), None);
-                Ok(map)
+                variants.insert(var_name, None);
+                Ok(variants)
               }
               Some(var_def) => {
                 let type_meta = self.parse_type(var_def)?;
-                map.insert(var_name.to_string(), Some(type_meta));
-                Ok(map)
+                variants.insert(var_name, Some(type_meta));
+                Ok(variants)
               }
               None => Err(format!("Expected json string for enum {}: got {:?}", name, val).into()),
             }
