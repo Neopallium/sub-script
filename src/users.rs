@@ -47,7 +47,10 @@ impl User {
     hex::encode(&self.pair.to_raw_vec())
   }
 
-  pub fn submit_call(&mut self, call: EncodedCall) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+  pub fn submit_call(
+    &mut self,
+    call: EncodedCall,
+  ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     let res = self.client.submit_call(self, call)?;
 
     // Only update the nonce if the extrinsic executed.

@@ -59,12 +59,13 @@ impl EnumVariants {
   }
 
   pub fn get_by_idx(&self, idx: u8) -> Option<&EnumVariant> {
-    self.variants.get(idx as usize)
-      .and_then(|v| v.as_ref())
+    self.variants.get(idx as usize).and_then(|v| v.as_ref())
   }
 
   pub fn get_by_name(&self, name: &str) -> Option<&EnumVariant> {
-    self.name_map.get(name)
+    self
+      .name_map
+      .get(name)
       .and_then(|idx| self.get_by_idx(*idx))
   }
 }
@@ -745,15 +746,17 @@ impl Types {
       Value::Array(arr) => {
         let variants = arr
           .iter()
-          .try_fold(EnumVariants::new(), |mut variants, val| match val.as_str() {
-            Some(name) => {
-              variants.insert(name, None);
-              Ok(variants)
+          .try_fold(EnumVariants::new(), |mut variants, val| {
+            match val.as_str() {
+              Some(name) => {
+                variants.insert(name, None);
+                Ok(variants)
+              }
+              None => Err(format!(
+                "Expected json string for enum {}: got {:?}",
+                name, val
+              )),
             }
-            None => Err(format!(
-              "Expected json string for enum {}: got {:?}",
-              name, val
-            )),
           })?;
         self.insert_meta(name, TypeMeta::Enum(variants));
       }
