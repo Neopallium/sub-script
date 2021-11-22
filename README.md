@@ -24,11 +24,10 @@ It uses [Rhai](https://rhai.rs) for the scripting engine.
 
 - Subscribe to storage updates.
 - Get storage values.
-- Better interface for getting events.
-- Replace/fix current `substrate-api-client` crate.
 - Add hook to auto-initialize new users (to support mocking cdd registration).
 - Add REPL support for quickly making extrinsic calls.
 - Support multiple `Engine` instances with shared User state (for nonces).  This will allow spawning sub-tasks for load testing.
+- Replace/fix current `substrate-api-client` crate.
 
 ## Examples
 
@@ -40,14 +39,17 @@ let alice = USER.Alice;
 let user = USER.Test123;
 
 // Mock Cdd for user and make sure they have some POLYX.
-alice.submit(TestUtils.mock_cdd_register_did(user));
-alice.submit(Balances.transfer(user, 5.0));
+let res = alice.submit(TestUtils.mock_cdd_register_did(user));
+if res.is_success {
+	// New account send them some POLYX.
+	alice.submit(Balances.transfer(user, 5.0));
+}
 
 // Generate another test user.  Key generated from "//Key1" seed.
 let key = USER.Key1; // Don't mock cdd for this user.
 
 // Add JoinIdentity authorization for `key` to join `user`.
-let block = user.submit(Identity.add_authorization(#{
+let res = user.submit(Identity.add_authorization(#{
 	Account: key
 }, #{
 	JoinIdentity: #{
@@ -56,8 +58,23 @@ let block = user.submit(Identity.add_authorization(#{
 		portfolio: #{ Whole: () },
 	}
 }, ()));
-// Print block hash.
-print(`block = ${block}`);
+if res.is_success {
+	// call successful.
+} else {
+	// call failed.
+	print(`failed: ${res.result}`);
+}
+
+// Process all events emitted by the call.
+for event in res.events {
+	print(`EventName: ${event.name}`);
+	print(`  Args: ${event.args}`);
+}
+// Process events matching prefix 'Identity.Auth'.
+for event in res.events("Identity.Auth") {
+	print(`EventName: ${event.name}`);
+	print(`  Args: ${event.args}`);
+}
 ```
 
 See other examples scripts in `./scripts/` folder.
