@@ -818,8 +818,7 @@ impl Types {
   pub fn parse_named_type(&mut self, name: &str, def: &str) -> Result<TypeRef, Box<EvalAltResult>> {
     let type_ref = self.parse_type(def)?;
 
-    self.insert(name, type_ref.clone());
-    Ok(type_ref)
+    Ok(self.insert_meta(name, TypeMeta::NewType(name.into(), type_ref)))
   }
 
   pub fn parse_type(&mut self, name: &str) -> Result<TypeRef, Box<EvalAltResult>> {
@@ -1156,15 +1155,34 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
     let era = Era::decode(&mut input)?;
     Ok(Dynamic::from(era))
   })?;
+
   types.custom_encode("AccountId", TypeId::of::<User>(), |value, data| {
     let user = value.cast::<User>();
     data.encode(user.public());
     Ok(())
   })?;
+  /*
+  types.custom_decode("AccountId", |mut input| {
+    eprintln!("Decode AccountId");
+    let account = AccountId::decode(&mut input)?;
+    eprintln!("Decoded AccountId: {:?}", account);
+    let val = Dynamic::from(account);
+    eprintln!("AccountId as Dynamic: {:?}", val);
+    Ok(val)
+  })?;
+  */
+
   types.custom_encode("MultiAddress", TypeId::of::<User>(), |value, data| {
     let user = value.cast::<User>();
     // Encode variant idx.
     data.encode(0u8); // MultiAddress::Id
+    data.encode(user.public());
+    Ok(())
+  })?;
+  types.custom_encode("Signatory", TypeId::of::<User>(), |value, data| {
+    let user = value.cast::<User>();
+    // Encode variant idx.
+    data.encode(1u8); // Signatory::Account
     data.encode(user.public());
     Ok(())
   })?;
