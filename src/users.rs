@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::sync::{Arc, RwLock};
 
 use sp_core::{sr25519, Pair};
 use sp_runtime::AccountId32;
 
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Scope, INT};
 
 use crate::client::{Client, ExtrinsicCallResult};
 use crate::metadata::EncodedCall;
@@ -40,28 +40,12 @@ impl User {
     self.pair.public()
   }
 
-  pub fn acc(&mut self) -> AccountId {
+  pub fn acc(&self) -> AccountId {
     self.account.clone()
   }
 
-  fn match_acc(&mut self, val: Vec<Dynamic>) -> bool {
-    let ary = val
-      .into_iter()
-      .map(|v| v.as_int().map(|v| v as u8))
-      .collect::<Result<Vec<u8>, _>>();
-    if let Some(ary) = ary.ok() {
-      if let Some(acc) = AccountId::try_from(ary.as_slice()).ok() {
-        self.acc() == acc
-      } else {
-        false
-      }
-    } else {
-      false
-    }
-  }
-
-  fn seed(&mut self) -> String {
-    hex::encode(&self.pair.to_raw_vec())
+  fn nonce(&self) -> INT {
+    self.nonce as INT
   }
 
   pub fn submit_call(
@@ -76,8 +60,36 @@ impl User {
     Ok(res)
   }
 
-  fn to_string(&mut self) -> String {
+  fn to_string(&self) -> String {
     self.name.clone()
+  }
+}
+
+#[derive(Clone)]
+pub struct SharedUser(Arc<RwLock<User>>);
+
+impl SharedUser {
+  pub fn public(&self) -> sr25519::Public {
+    self.0.read().unwrap().public()
+  }
+
+  pub fn acc(&mut self) -> AccountId {
+    self.0.read().unwrap().acc()
+  }
+
+  fn nonce(&mut self) -> INT {
+    self.0.read().unwrap().nonce()
+  }
+
+  pub fn submit_call(
+    &mut self,
+    call: EncodedCall,
+  ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+    self.0.write().unwrap().submit_call(call)
+  }
+
+  fn to_string(&mut self) -> String {
+    self.0.read().unwrap().to_string()
   }
 }
 
@@ -107,11 +119,12 @@ impl Users {
       Entry::Occupied(entry) => entry.get().clone(),
       Entry::Vacant(entry) => {
         let user = User::new(self.client.clone(), entry.key())?;
-        let acc = user.account.clone();
-        let val = Dynamic::from(user).into_shared();
-        entry.insert(val.clone());
-        self.account_map.insert(acc, val.clone());
-        val
+        let acc = user.acc();
+        // Create a shared wrapper for the user.
+        let shared = Dynamic::from(SharedUser(Arc::new(RwLock::new(user))));
+        entry.insert(shared.clone());
+        self.account_map.insert(acc, shared.clone());
+        shared
       }
     })
   }
@@ -119,13 +132,11 @@ impl Users {
 
 pub fn init_engine(engine: &mut Engine) {
   engine
-    .register_type_with_name::<User>("User")
-    .register_get("acc", User::acc)
-    .register_fn("match_acc", User::match_acc)
-    .register_get("seed", User::seed)
-    .register_fn("to_string", User::to_string)
-    .register_fn("to_debug", User::to_string)
-    .register_result_fn("submit", User::submit_call)
+    .register_type_with_name::<SharedUser>("User")
+    .register_get("acc", SharedUser::acc)
+    .register_get("nonce", SharedUser::nonce)
+    .register_fn("to_string", SharedUser::to_string)
+    .register_result_fn("submit", SharedUser::submit_call)
     .register_type_with_name::<AccountId>("AccountId")
     .register_fn("to_string", |acc: &mut AccountId| acc.to_string())
     .register_fn("==", |acc1: AccountId, acc2: AccountId| acc1 == acc2)

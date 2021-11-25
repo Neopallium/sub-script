@@ -18,7 +18,7 @@ use smartstring::{LazyCompact, SmartString};
 use indexmap::map::IndexMap;
 
 use super::metadata::EncodedArgs;
-use super::users::{AccountId, User};
+use super::users::{AccountId, SharedUser};
 
 #[derive(Clone, Debug, Default)]
 pub struct EnumVariant {
@@ -443,8 +443,8 @@ impl TypeMeta {
             type_ref.encode_value(value, data)?
           }
         } else {
-          if *len == 32 && value.is::<User>() {
-            let user = value.cast::<User>();
+          if *len == 32 && value.is::<SharedUser>() {
+            let user = value.cast::<SharedUser>();
             data.encode(user.public());
           } else {
             Err(format!(
@@ -1156,24 +1156,28 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
     Ok(Dynamic::from(era))
   })?;
 
-  types.custom_encode("AccountId", TypeId::of::<User>(), |value, data| {
-    let user = value.cast::<User>();
+  types.custom_encode("AccountId", TypeId::of::<SharedUser>(), |value, data| {
+    let user = value.cast::<SharedUser>();
     data.encode(user.public());
+    Ok(())
+  })?;
+  types.custom_encode("AccountId", TypeId::of::<AccountId>(), |value, data| {
+    data.encode(value.cast::<AccountId>());
     Ok(())
   })?;
   types.custom_decode("AccountId", |mut input| {
     Ok(Dynamic::from(AccountId::decode(&mut input)?))
   })?;
 
-  types.custom_encode("MultiAddress", TypeId::of::<User>(), |value, data| {
-    let user = value.cast::<User>();
+  types.custom_encode("MultiAddress", TypeId::of::<SharedUser>(), |value, data| {
+    let user = value.cast::<SharedUser>();
     // Encode variant idx.
     data.encode(0u8); // MultiAddress::Id
     data.encode(user.public());
     Ok(())
   })?;
-  types.custom_encode("Signatory", TypeId::of::<User>(), |value, data| {
-    let user = value.cast::<User>();
+  types.custom_encode("Signatory", TypeId::of::<SharedUser>(), |value, data| {
+    let user = value.cast::<SharedUser>();
     // Encode variant idx.
     data.encode(1u8); // Signatory::Account
     data.encode(user.public());
