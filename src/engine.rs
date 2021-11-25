@@ -42,6 +42,7 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
 
   #[cfg(not(feature = "no_optimize"))]
   engine.set_optimization_level(OptimizationLevel::Full);
+  engine.set_max_expr_depths(64, 64);
 
   // Register types with engine.
   users::init_engine(&mut engine);
