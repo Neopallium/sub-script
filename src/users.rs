@@ -126,11 +126,9 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
     .register_result_fn("submit", User::submit_call)
-
     .register_type_with_name::<AccountId>("AccountId")
     .register_fn("to_string", |acc: &mut AccountId| acc.to_string())
     .register_fn("==", |acc1: AccountId, acc2: AccountId| acc1 == acc2)
-
     .register_type_with_name::<Users>("Users")
     .register_fn("new_users", Users::new)
     .register_fn("find_by_account", Users::find_by_account)

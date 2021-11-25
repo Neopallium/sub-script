@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use frame_metadata::RuntimeMetadataPrefixed;
@@ -12,7 +11,7 @@ use substrate_api_client::rpc::{json_req::*, XtStatus};
 use substrate_api_client::{Api, Hash, StorageValue};
 
 use rhai::serde::from_dynamic;
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap, Scope};
 
 use crate::metadata::EncodedCall;
 use crate::types::{TypeLookup, TypeRef};
@@ -43,63 +42,58 @@ pub enum Phase {
   Initialization,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct NamedEvent(String, Dynamic);
-
-impl NamedEvent {
-  pub fn name(&mut self) -> String {
-    self.0.clone()
-  }
-
-  pub fn args(&mut self) -> Dynamic {
-    self.1.clone()
-  }
-
-  pub fn to_string(&mut self) -> String {
-    format!("{}({:#?})", self.0, self.1)
-  }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct EventList(Vec<NamedEvent>);
-
-impl EventList {
-  pub fn to_string(&mut self) -> String {
-    format!("Events: {:#?}", self.0)
-  }
-
-  pub fn into_inner(self) -> Vec<NamedEvent> {
-    self.0
-  }
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Debug)]
 pub struct EventRecord {
   pub phase: Phase,
-  pub event: HashMap<String, HashMap<String, Dynamic>>,
+  pub name: String,
+  pub args: Dynamic,
   pub topics: Vec<Hash>,
 }
 
 impl EventRecord {
+  pub fn name(&mut self) -> String {
+    self.name.clone()
+  }
+
+  pub fn args(&mut self) -> Dynamic {
+    self.args.clone()
+  }
+
   pub fn to_string(&mut self) -> String {
     format!("{:#?}", self)
   }
 
-  pub fn into_named(self) -> NamedEvent {
-    // Two nested maps, should only have one item each.
-    if let Some((mod_name, event)) = self.event.into_iter().next() {
-      if let Some((name, event)) = event.into_iter().next() {
-        NamedEvent(format!("{}.{}", mod_name, name), event)
-      } else {
-        NamedEvent(format!("{}", mod_name), Dynamic::UNIT)
+  pub fn from_dynamic(val: Dynamic) -> Result<Self, Box<EvalAltResult>> {
+    let mut map = val.try_cast::<RMap>().ok_or("Expected Map")?;
+
+    // Decod event name and args from two nested maps,
+    // should only have one item in each map.
+    let event = map
+      .remove("event")
+      .ok_or("Missing field 'event'")?
+      .try_cast::<RMap>()
+      .ok_or("Expected Map")?;
+    let (name, args) = match event.into_iter().next() {
+      Some((mod_name, map2)) => {
+        let map2 = map2.try_cast::<RMap>().ok_or("Expected Map")?;
+        match map2.into_iter().next() {
+          Some((name, args)) => (format!("{}.{}", mod_name, name), args),
+          None => (format!("{}", mod_name), Dynamic::UNIT),
+        }
       }
-    } else {
-      NamedEvent("()".into(), Dynamic::UNIT)
-    }
+      None => ("()".into(), Dynamic::UNIT),
+    };
+
+    Ok(Self {
+      phase: from_dynamic(map.get("phase").ok_or("Missing field 'phase'")?)?,
+      name,
+      args,
+      topics: from_dynamic(map.get("topics").ok_or("Missing field 'topics'")?)?,
+    })
   }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct EventRecords(Vec<EventRecord>);
 
 impl EventRecords {
@@ -107,12 +101,18 @@ impl EventRecords {
     self.0.retain(|ev| ev.phase == phase);
   }
 
-  pub fn into_event_list(self) -> EventList {
-    EventList(self.0.into_iter().map(|ev| ev.into_named()).collect())
-  }
-
   pub fn to_string(&mut self) -> String {
     format!("{:#?}", self.0)
+  }
+
+  pub fn from_dynamic(val: Dynamic) -> Result<Self, Box<EvalAltResult>> {
+    let arr = val.try_cast::<Vec<Dynamic>>().ok_or("Expected Array")?;
+    Ok(Self(
+      arr
+        .into_iter()
+        .map(EventRecord::from_dynamic)
+        .collect::<Result<Vec<EventRecord>, _>>()?,
+    ))
   }
 }
 
@@ -337,7 +337,7 @@ pub struct ExtrinsicCallResult {
   hash: Option<Hash>,
   xthex: String,
   idx: Option<u32>,
-  events: Option<EventList>,
+  events: Option<EventRecords>,
 }
 
 impl ExtrinsicCallResult {
@@ -363,13 +363,13 @@ impl ExtrinsicCallResult {
           None => None,
         };
         self.idx = xt_idx.map(|idx| idx as u32);
-        let mut events: EventRecords = from_dynamic(&self.client.get_events(Some(hash))?)?;
+        let mut events = EventRecords::from_dynamic(self.client.get_events(Some(hash))?)?;
         if let Some(idx) = self.idx {
           events.filter(Phase::ApplyExtrinsic(idx));
         }
-        events.into_event_list()
+        events
       }
-      None => EventList::default(),
+      None => EventRecords::default(),
     };
 
     self.events = Some(events);
@@ -383,7 +383,7 @@ impl ExtrinsicCallResult {
         let filtered = events
           .0
           .iter()
-          .filter(|ev| ev.0.starts_with(prefix))
+          .filter(|ev| ev.name.starts_with(prefix))
           .cloned()
           .map(|ev| Dynamic::from(ev))
           .collect::<Vec<_>>();
@@ -451,13 +451,9 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<EventRecords>("EventRecords")
     .register_fn("to_string", EventRecords::to_string)
     .register_type_with_name::<EventRecord>("EventRecord")
+    .register_get("name", EventRecord::name)
+    .register_get("args", EventRecord::args)
     .register_fn("to_string", EventRecord::to_string)
-    .register_type_with_name::<NamedEvent>("Event")
-    .register_get("name", NamedEvent::name)
-    .register_get("args", NamedEvent::args)
-    .register_fn("to_string", NamedEvent::to_string)
-    .register_type_with_name::<EventList>("EventList")
-    .register_fn("to_string", EventList::to_string)
     .register_type_with_name::<ExtrinsicCallResult>("ExtrinsicCallResult")
     .register_result_fn("events", ExtrinsicCallResult::events_filtered)
     .register_get_result("events", ExtrinsicCallResult::events)

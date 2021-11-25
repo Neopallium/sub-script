@@ -18,7 +18,7 @@ use smartstring::{LazyCompact, SmartString};
 use indexmap::map::IndexMap;
 
 use super::metadata::EncodedArgs;
-use super::users::User;
+use super::users::{AccountId, User};
 
 #[derive(Clone, Debug, Default)]
 pub struct EnumVariant {
@@ -1161,16 +1161,9 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
     data.encode(user.public());
     Ok(())
   })?;
-  /*
   types.custom_decode("AccountId", |mut input| {
-    eprintln!("Decode AccountId");
-    let account = AccountId::decode(&mut input)?;
-    eprintln!("Decoded AccountId: {:?}", account);
-    let val = Dynamic::from(account);
-    eprintln!("AccountId as Dynamic: {:?}", val);
-    Ok(val)
+    Ok(Dynamic::from(AccountId::decode(&mut input)?))
   })?;
-  */
 
   types.custom_encode("MultiAddress", TypeId::of::<User>(), |value, data| {
     let user = value.cast::<User>();
