@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use sp_core::{sr25519, Pair};
 use sp_runtime::AccountId32;
@@ -41,6 +42,22 @@ impl User {
 
   pub fn acc(&mut self) -> AccountId {
     self.account.clone()
+  }
+
+  fn match_acc(&mut self, val: Vec<Dynamic>) -> bool {
+    let ary = val
+      .into_iter()
+      .map(|v| v.as_int().map(|v| v as u8))
+      .collect::<Result<Vec<u8>, _>>();
+    if let Some(ary) = ary.ok() {
+      if let Some(acc) = AccountId::try_from(ary.as_slice()).ok() {
+        self.acc() == acc
+      } else {
+        false
+      }
+    } else {
+      false
+    }
   }
 
   fn seed(&mut self) -> String {
@@ -96,6 +113,7 @@ pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<User>("User")
     .register_get("acc", User::acc)
+    .register_fn("match_acc", User::match_acc)
     .register_get("seed", User::seed)
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
