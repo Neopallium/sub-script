@@ -84,6 +84,7 @@ impl User {
 #[derive(Clone)]
 pub struct Users {
   users: HashMap<String, Dynamic>,
+  account_map: HashMap<AccountId, Dynamic>,
   client: Client,
 }
 
@@ -91,8 +92,13 @@ impl Users {
   pub fn new(client: Client) -> Self {
     Self {
       users: HashMap::new(),
+      account_map: HashMap::new(),
       client,
     }
+  }
+
+  pub fn find_by_account(&mut self, acc: AccountId) -> Dynamic {
+    self.account_map.get(&acc).cloned().unwrap_or(Dynamic::UNIT)
   }
 
   fn get_user(&mut self, name: String) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -101,8 +107,10 @@ impl Users {
       Entry::Occupied(entry) => entry.get().clone(),
       Entry::Vacant(entry) => {
         let user = User::new(self.client.clone(), entry.key())?;
+        let acc = user.account.clone();
         let val = Dynamic::from(user).into_shared();
         entry.insert(val.clone());
+        self.account_map.insert(acc, val.clone());
         val
       }
     })
@@ -118,10 +126,14 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("to_string", User::to_string)
     .register_fn("to_debug", User::to_string)
     .register_result_fn("submit", User::submit_call)
+
     .register_type_with_name::<AccountId>("AccountId")
     .register_fn("to_string", |acc: &mut AccountId| acc.to_string())
+    .register_fn("==", |acc1: AccountId, acc2: AccountId| acc1 == acc2)
+
     .register_type_with_name::<Users>("Users")
     .register_fn("new_users", Users::new)
+    .register_fn("find_by_account", Users::find_by_account)
     .register_indexer_get_result(Users::get_user);
 }
 
