@@ -9,7 +9,7 @@ use frame_metadata::{
 use parity_scale_codec::{Encode, Output};
 
 use rhai::plugin::NativeCallContext;
-use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope, INT};
 
 use crate::client::Client;
 use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
@@ -26,6 +26,7 @@ fn decode<B: 'static, O: 'static>(
 #[derive(Clone)]
 pub struct Metadata {
   modules: HashMap<String, ModuleMetadata>,
+  idx_map: HashMap<u8, String>,
 }
 
 impl Metadata {
@@ -54,10 +55,12 @@ impl Metadata {
 
     let mut api_md = Self {
       modules: HashMap::new(),
+      idx_map: HashMap::new(),
     };
 
-    // Top-level event type.
+    // Top-level event/error types.
     let mut mod_events = EnumVariants::new();
+    let mut mod_errors = EnumVariants::new();
 
     // Decode module metadata.
     decode(&md.modules)?
@@ -66,12 +69,16 @@ impl Metadata {
         let m = ModuleMetadata::decode(m, lookup)?;
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
+        mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        api_md.idx_map.insert(m.index, name.clone());
         api_md.modules.insert(name, m);
         Ok(())
       })?;
 
     let raw_event_ref = lookup.insert_meta("RawEvent", TypeMeta::Enum(mod_events));
     lookup.insert("Event", raw_event_ref);
+    let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
+    lookup.insert("Error", raw_error_ref);
 
     Ok(api_md)
   }
@@ -93,6 +100,15 @@ impl Metadata {
     self.modules.values().cloned().map(Dynamic::from).collect()
   }
 
+  fn find_error(&self, mod_idx: INT, err_idx: INT) -> Dynamic {
+    let idx = mod_idx as u8;
+    self
+      .idx_map
+      .get(&idx)
+      .and_then(|mod_name| self.modules.get(mod_name))
+      .map_or(Dynamic::UNIT, |module| module.find_error(err_idx))
+  }
+
   fn indexer_get(&mut self, name: String) -> Result<Dynamic, Box<EvalAltResult>> {
     let m = self
       .modules
@@ -111,7 +127,11 @@ pub struct ModuleMetadata {
   storage: HashMap<String, StorageMetadata>,
   funcs: HashMap<String, FuncMetadata>,
   events: HashMap<String, EventMetadata>,
+  constants: HashMap<String, ConstMetadata>,
+  errors: HashMap<String, ErrorMetadata>,
+  err_idx_map: HashMap<u8, String>,
   event_ref: Option<TypeRef>,
+  error_ref: Option<TypeRef>,
 }
 
 impl ModuleMetadata {
@@ -128,7 +148,11 @@ impl ModuleMetadata {
       storage: HashMap::new(),
       funcs: HashMap::new(),
       events: HashMap::new(),
+      constants: HashMap::new(),
+      errors: HashMap::new(),
+      err_idx_map: HashMap::new(),
       event_ref: None,
+      error_ref: None,
     };
 
     // Decode module functions.
@@ -179,7 +203,46 @@ impl ModuleMetadata {
       ));
     }
 
+    // Decode module constants.
+    decode(&md.constants)?.iter().enumerate().try_for_each(
+      |(const_idx, md)| -> Result<(), Box<EvalAltResult>> {
+        let constant = ConstMetadata::decode(&mod_name, mod_idx, const_idx as u8, md, lookup)?;
+        let name = constant.name.clone();
+        module.constants.insert(name, constant);
+        Ok(())
+      },
+    )?;
+
+    // Decode module errors.
+    // Module RawError type.
+    let mut raw_errors = EnumVariants::new();
+
+    decode(&md.errors)?.iter().enumerate().try_for_each(
+      |(error_idx, md)| -> Result<(), Box<EvalAltResult>> {
+        let error = ErrorMetadata::decode(&mod_name, mod_idx, error_idx as u8, md)?;
+        let name = error.name.clone();
+        raw_errors.insert_at(error.error_idx, &name, None);
+        module.err_idx_map.insert(error.error_idx, name.clone());
+        module.errors.insert(name, error);
+        Ok(())
+      },
+    )?;
+    module.error_ref = Some(lookup.insert_meta(
+      &format!("{}::RawError", mod_name),
+      TypeMeta::Enum(raw_errors),
+    ));
+
     Ok(module)
+  }
+
+  fn find_error(&self, err_idx: INT) -> Dynamic {
+    let idx = err_idx as u8;
+    self
+      .err_idx_map
+      .get(&idx)
+      .and_then(|err_name| self.errors.get(err_name))
+      .cloned()
+      .map_or(Dynamic::UNIT, Dynamic::from)
   }
 
   pub fn add_encode_calls(
@@ -202,6 +265,19 @@ impl ModuleMetadata {
 
   fn events(&mut self) -> Vec<Dynamic> {
     self.events.values().cloned().map(Dynamic::from).collect()
+  }
+
+  fn constants(&mut self) -> Vec<Dynamic> {
+    self
+      .constants
+      .values()
+      .cloned()
+      .map(Dynamic::from)
+      .collect()
+  }
+
+  fn errors(&mut self) -> Vec<Dynamic> {
+    self.errors.values().cloned().map(Dynamic::from).collect()
   }
 
   fn storage(&mut self) -> Vec<Dynamic> {
@@ -411,6 +487,92 @@ impl EventMetadata {
       .collect::<Vec<String>>()
       .join(", ");
     format!("Event: {}.{}({})", self.mod_name, self.name, args)
+  }
+}
+
+#[derive(Clone)]
+pub struct ConstMetadata {
+  mod_name: String,
+  name: String,
+  mod_idx: u8,
+  const_idx: u8,
+  const_ty: NamedType,
+  docs: Docs,
+}
+
+impl ConstMetadata {
+  fn decode(
+    mod_name: &str,
+    mod_idx: u8,
+    const_idx: u8,
+    md: &frame_metadata::ModuleConstantMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let ty = decode(&md.ty)?;
+    let const_ty = NamedType::new(ty, lookup)?;
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: decode(&md.name)?.clone(),
+      mod_idx,
+      const_idx,
+      const_ty,
+      docs: Docs::decode(&md.documentation)?,
+    })
+  }
+
+  fn title(&mut self) -> String {
+    self.docs.title()
+  }
+
+  fn docs(&mut self) -> String {
+    self.docs.to_string()
+  }
+
+  fn to_string(&mut self) -> String {
+    format!(
+      "Constant: {}.{}({})",
+      self.mod_name,
+      self.name,
+      self.const_ty.to_string()
+    )
+  }
+}
+
+#[derive(Clone)]
+pub struct ErrorMetadata {
+  mod_name: String,
+  name: String,
+  mod_idx: u8,
+  error_idx: u8,
+  docs: Docs,
+}
+
+impl ErrorMetadata {
+  fn decode(
+    mod_name: &str,
+    mod_idx: u8,
+    error_idx: u8,
+    md: &frame_metadata::ErrorMetadata,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: decode(&md.name)?.clone(),
+      mod_idx,
+      error_idx,
+      docs: Docs::decode(&md.documentation)?,
+    })
+  }
+
+  fn title(&mut self) -> String {
+    self.docs.title()
+  }
+
+  fn docs(&mut self) -> String {
+    self.docs.to_string()
+  }
+
+  fn to_string(&mut self) -> String {
+    format!("Error: {}.{}", self.mod_name, self.name)
   }
 }
 
@@ -683,10 +845,16 @@ pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<Metadata>("Metadata")
     .register_get("modules", Metadata::modules)
+    .register_fn(
+      "find_error",
+      |md: &mut Metadata, mod_idx: INT, err_idx: INT| md.find_error(mod_idx, err_idx),
+    )
     .register_indexer_get_result(Metadata::indexer_get)
     .register_type_with_name::<ModuleMetadata>("ModuleMetadata")
     .register_get("funcs", ModuleMetadata::funcs)
     .register_get("events", ModuleMetadata::events)
+    .register_get("constants", ModuleMetadata::constants)
+    .register_get("errors", ModuleMetadata::errors)
     .register_get("storage", ModuleMetadata::storage)
     .register_fn("to_string", ModuleMetadata::to_string)
     .register_indexer_get_result(ModuleMetadata::indexer_get)
@@ -709,6 +877,14 @@ pub fn init_engine(engine: &mut Engine) {
     .register_get("args", EventMetadata::args)
     .register_get("title", EventMetadata::title)
     .register_get("docs", EventMetadata::docs)
+    .register_type_with_name::<ConstMetadata>("ConstMetadata")
+    .register_fn("to_string", ConstMetadata::to_string)
+    .register_get("title", ConstMetadata::title)
+    .register_get("docs", ConstMetadata::docs)
+    .register_type_with_name::<ErrorMetadata>("ErrorMetadata")
+    .register_fn("to_string", ErrorMetadata::to_string)
+    .register_get("title", ErrorMetadata::title)
+    .register_get("docs", ErrorMetadata::docs)
     .register_type_with_name::<NamedType>("NamedType")
     .register_fn("to_string", NamedType::to_string)
     .register_get("name", NamedType::get_name)
