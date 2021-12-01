@@ -259,6 +259,14 @@ impl ModuleMetadata {
     Ok(())
   }
 
+  fn index(&mut self) -> INT {
+    self.index as INT
+  }
+
+  fn name(&mut self) -> String {
+    self.name.clone()
+  }
+
   fn funcs(&mut self) -> Vec<Dynamic> {
     self.funcs.values().cloned().map(Dynamic::from).collect()
   }
@@ -563,6 +571,14 @@ impl ErrorMetadata {
     })
   }
 
+  fn index(&mut self) -> INT {
+    self.error_idx as INT
+  }
+
+  fn name(&mut self) -> String {
+    self.name.clone()
+  }
+
   fn title(&mut self) -> String {
     self.docs.title()
   }
@@ -851,6 +867,8 @@ pub fn init_engine(engine: &mut Engine) {
     )
     .register_indexer_get_result(Metadata::indexer_get)
     .register_type_with_name::<ModuleMetadata>("ModuleMetadata")
+    .register_get("name", ModuleMetadata::name)
+    .register_get("index", ModuleMetadata::index)
     .register_get("funcs", ModuleMetadata::funcs)
     .register_get("events", ModuleMetadata::events)
     .register_get("constants", ModuleMetadata::constants)
@@ -882,6 +900,8 @@ pub fn init_engine(engine: &mut Engine) {
     .register_get("title", ConstMetadata::title)
     .register_get("docs", ConstMetadata::docs)
     .register_type_with_name::<ErrorMetadata>("ErrorMetadata")
+    .register_get("name", ErrorMetadata::name)
+    .register_get("index", ErrorMetadata::index)
     .register_fn("to_string", ErrorMetadata::to_string)
     .register_get("title", ErrorMetadata::title)
     .register_get("docs", ErrorMetadata::docs)
