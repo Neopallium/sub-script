@@ -3,7 +3,7 @@ pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 #[cfg(not(feature = "no_optimize"))]
 use rhai::OptimizationLevel;
 
-use crate::{client, metadata, types, users};
+use crate::{client, metadata, types, users, plugins};
 
 pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   fn eprint_line(lines: &[&str], pos: Position, err_msg: &str) {
@@ -49,12 +49,14 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
   client::init_engine(&mut engine);
   types::init_engine(&mut engine);
   metadata::init_engine(&mut engine);
+  plugins::init_engine(&mut engine);
 
   // Initialize scope with some globals.
   let lookup = types::init_scope(&schema, &mut scope)?;
   let client = client::init_scope(url, &lookup, &mut scope)?;
   users::init_scope(&client, &mut scope);
   metadata::init_scope(&client, &lookup, &mut engine, &mut scope)?;
+  plugins::init_scope(&client, &lookup, &mut engine, &mut scope)?;
 
   Ok((engine, scope))
 }

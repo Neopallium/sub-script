@@ -22,7 +22,7 @@ pub struct User {
 
 impl User {
   fn new(client: Client, name: &str) -> Result<Self, Box<EvalAltResult>> {
-    eprintln!("New user: {}", name);
+    log::info!("New user: {}", name);
     let seed = format!("//{}", name);
     let pair = sr25519::Pair::from_string(&seed, None).map_err(|e| format!("{:?}", e))?;
     let account = AccountId::new(pair.public().into());

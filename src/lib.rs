@@ -12,3 +12,6 @@ pub use types::*;
 
 pub mod metadata;
 pub use metadata::*;
+
+pub mod plugins;
+pub use plugins::*;

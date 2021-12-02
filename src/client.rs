@@ -143,6 +143,16 @@ impl InnerClient {
     Ok(self.api.get_metadata().map_err(|e| e.to_string())?)
   }
 
+  pub fn get_signed_extra(&self) -> AdditionalSigned {
+    (
+      self.api.runtime_version.spec_version,
+      self.api.runtime_version.transaction_version,
+      self.api.genesis_hash,
+      self.api.genesis_hash,
+      (), (), ()
+    )
+  }
+
   pub fn get_block(&self, hash: Option<Hash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     Ok(self.get_signed_block(hash)?.map(|signed| signed.block))
   }
@@ -197,7 +207,7 @@ impl InnerClient {
     Ok(nonce)
   }
 
-  fn submit(&self, xthex: String) -> Result<(Option<Hash>, String), Box<EvalAltResult>> {
+  pub fn submit(&self, xthex: String) -> Result<(Option<Hash>, String), Box<EvalAltResult>> {
     let hash = self
       .api
       .send_extrinsic(xthex.clone(), XtStatus::InBlock)
@@ -265,6 +275,10 @@ impl Client {
     self.inner.read().unwrap().get_metadata()
   }
 
+  pub fn get_signed_extra(&self) -> AdditionalSigned {
+    self.inner.read().unwrap().get_signed_extra()
+  }
+
   pub fn get_block(&self, hash: Option<Hash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
   }
@@ -299,6 +313,15 @@ impl Client {
 
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_nonce(account)
+  }
+
+  pub fn submit(&self, xthex: String) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+    self
+      .inner
+      .read()
+      .unwrap()
+      .submit(xthex)
+      .map(|(block, xthex)| ExtrinsicCallResult::new(self, block, xthex))
   }
 
   pub fn submit_call(

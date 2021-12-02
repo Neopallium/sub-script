@@ -11,6 +11,9 @@ log = "0.4"
 dotenv = "0.15"
 env_logger = "0.9"
 
+futures = "0.3"
+byteorder = "1.4"
+
 # substrate
 sp-core = "3.0.0"
 sp-keyring = "3.0.0"
@@ -28,3 +31,8 @@ serde = "1.0.130"
 hex = "0.4.3"
 rust_decimal = "1.16.0"
 smartstring = "0.2.9"
+
+# Ledger
+ledger-transport-hid = "0.8.0"
+ledger-apdu = "0.8.0"
+ledger-transport = "0.8.0"
