@@ -148,6 +148,7 @@ impl CustomType {
     data: &mut EncodedArgs,
   ) -> Result<(), Box<EvalAltResult>> {
     let type_id = value.type_id();
+    log::debug!("encode Custom: type_id={:?}", type_id);
     if let Some(func) = self.encode_map.get(&type_id) {
       func.encode_value(value, data)
     } else {
@@ -312,6 +313,7 @@ impl TypeMeta {
     value: Dynamic,
     data: &mut EncodedArgs,
   ) -> Result<(), Box<EvalAltResult>> {
+    log::debug!("encode TypeMeta: {:?}", self);
     match self {
       TypeMeta::Unit => (),
       TypeMeta::Integer(len, signed) => {
