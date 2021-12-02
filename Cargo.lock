@@ -1513,25 +1513,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fd30577977224748312cdbb1f64a04515ab0f24457d1e29cd3a64aed3e1dc33"
 
 [[package]]
-name = "ledger-transport"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51a3219b22d4c49ad12b7d486d95147dc3e03f92bd5ba82f0177da818acd883d"
-dependencies = [
- "byteorder",
- "futures 0.3.18",
- "js-sys",
- "lazy_static",
- "ledger-apdu",
- "ledger-transport-hid",
- "serde",
- "thiserror",
- "trait-async",
- "wasm-bindgen",
- "wasm-bindgen-futures",
-]
-
-[[package]]
 name = "ledger-transport-hid"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3364,15 +3345,12 @@ name = "sub-script"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "byteorder",
  "dotenv",
  "env_logger",
  "frame-metadata",
- "futures 0.3.18",
  "hex",
  "indexmap",
  "ledger-apdu",
- "ledger-transport",
  "ledger-transport-hid",
  "log",
  "parity-scale-codec",
@@ -3688,17 +3666,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
-]
-
-[[package]]
-name = "trait-async"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfe8c654712ee594c93b7222d98b4e61c7e003aec49e73877edac607a213699d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

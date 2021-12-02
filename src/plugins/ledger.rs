@@ -2,8 +2,8 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
-
-use byteorder::{LittleEndian, WriteBytesExt};
+use std::net::TcpStream;
+use std::io::{Read, Write};
 
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
@@ -13,7 +13,6 @@ use sp_runtime::generic;
 use substrate_api_client::extrinsic::xt_primitives::*;
 
 use ledger_apdu::{APDUAnswer, APDUCommand, APDUErrorCodes};
-use ledger_transport::APDUTransport;
 
 use sp_core::Encode;
 
@@ -21,6 +20,8 @@ use crate::client::{Client, ExtrinsicCallResult};
 use crate::metadata::EncodedCall;
 use crate::types::TypeLookup;
 use crate::users::AccountId;
+
+pub const MAX_PACKET_LEN: u32 = 10_000_000;
 
 pub const HIGH_BIT: u32 = 0x8000_0000;
 pub const CHUNK_SIZE: usize = 250;
@@ -43,22 +44,69 @@ pub const SLIP0044_POLYMESH: u32 = 595;
 // APP
 pub const APP_POLYMESH: u8 = 0x91;
 
+pub trait LedgerSyncTransport: Send + Sync {
+  fn send_cmd(&self, command: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>>;
+}
+
+impl LedgerSyncTransport for ledger::TransportNativeHID {
+  fn send_cmd(&self, command: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>> {
+    Ok(self.exchange(&command).map_err(|e| e.to_string())?)
+  }
+}
+
+struct TransportTcp(RwLock<TcpStream>);
+
+impl LedgerSyncTransport for TransportTcp {
+  fn send_cmd(&self, c: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>> {
+    let mut sock = self.0.write().unwrap();
+
+    let packet_len = 5 + c.data.len();
+    let mut buf = Vec::with_capacity(packet_len + 4);
+
+    // Write packet.
+    buf.extend(u32::to_be_bytes(packet_len as u32));
+    buf.extend(&[c.cla, c.ins, c.p1, c.p2, c.data.len() as u8]);
+    buf.extend(&c.data);
+    sock.write(&buf).map_err(|e| e.to_string())?;
+
+    // Read packet length
+    let mut buf = [0; 4];
+    sock.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    let packet_len = u32::from_be_bytes(buf) + 2;
+    if packet_len > MAX_PACKET_LEN {
+      return Err(format!("APDU Packet is too large: {} > {}", packet_len, MAX_PACKET_LEN).into());
+    }
+    let mut buf = vec![0u8; packet_len as usize];
+    sock.read_exact(&mut buf).map_err(|e| e.to_string())?;
+    log::debug!("Answer length: {}", buf.len());
+
+    Ok(APDUAnswer::from_answer(buf))
+  }
+}
+
 #[derive(Clone)]
 pub struct Ledger {
-  transport: Arc<APDUTransport>,
+  transport: Arc<dyn LedgerSyncTransport>,
 }
 
 impl Ledger {
   pub fn new_hid() -> Result<Self, Box<EvalAltResult>> {
     let transport = ledger::TransportNativeHID::new().map_err(|e| e.to_string())?;
     Ok(Self {
-      transport: Arc::new(APDUTransport::new(transport)),
+      transport: Arc::new(transport),
     })
   }
 
-  pub fn exchange(&self, command: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>> {
+  pub fn new_tcp(addr: &str) -> Result<Self, Box<EvalAltResult>> {
+    let stream = TcpStream::connect(addr).map_err(|e| e.to_string())?;
+    Ok(Self {
+      transport: Arc::new(TransportTcp(RwLock::new(stream))),
+    })
+  }
+
+  pub fn send_cmd(&self, command: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>> {
     log::debug!("Ledger cmd: {:?}", command);
-    Ok(futures::executor::block_on(self.transport.exchange(&command)).map_err(|e| e.to_string())?)
+    self.transport.send_cmd(command)
   }
 }
 
@@ -81,20 +129,12 @@ impl AddressBip44 {
   }
 
   pub fn encode(&self) -> Vec<u8> {
-    let mut buf = Vec::new();
-    buf.write_u32::<LittleEndian>(HIGH_BIT | 44).unwrap();
-    buf
-      .write_u32::<LittleEndian>(HIGH_BIT | self.slip0044)
-      .unwrap();
-    buf
-      .write_u32::<LittleEndian>(HIGH_BIT | self.account)
-      .unwrap();
-    buf
-      .write_u32::<LittleEndian>(HIGH_BIT | self.change)
-      .unwrap();
-    buf
-      .write_u32::<LittleEndian>(HIGH_BIT | self.address_index)
-      .unwrap();
+    let mut buf = Vec::with_capacity(20);
+    buf.extend(u32::to_le_bytes(HIGH_BIT | 44));
+    buf.extend(u32::to_le_bytes(HIGH_BIT | self.slip0044));
+    buf.extend(u32::to_le_bytes(HIGH_BIT | self.account));
+    buf.extend(u32::to_le_bytes(HIGH_BIT | self.change));
+    buf.extend(u32::to_le_bytes(HIGH_BIT | self.address_index));
     buf
   }
 }
@@ -135,7 +175,7 @@ impl SubstrateApp {
     p2: u8,
     data: Vec<u8>,
   ) -> Result<Vec<u8>, Box<EvalAltResult>> {
-    Ok(Self::is_error(self.ledger.exchange(APDUCommand {
+    Ok(Self::is_error(self.ledger.send_cmd(APDUCommand {
       cla: self.cla,
       ins,
       p1,
@@ -214,9 +254,10 @@ impl SubstrateApp {
 
     let signature = self.sign(payload.encode())?;
     log::debug!(
-      "signature res: len={}, sig[0]={}",
+      "signature res: len={}, sig_type={}, sig={:?}",
       signature.len(),
-      signature[0]
+      signature[0],
+      &signature[1..]
     );
     let sig = match self.scheme {
       SCHEME_ED25519 => ed25519::Signature::from_slice(&signature[1..]).into(),
@@ -277,12 +318,20 @@ impl LedgerApps {
 
   fn get_ledger(&mut self, ledger_type: &str) -> Result<Ledger, Box<EvalAltResult>> {
     use std::collections::hash_map::Entry;
-    Ok(match self.ledgers.entry(ledger_type.into()) {
+    // Normalize name for lookup.
+    let (transport, param) = ledger_type
+      .split_once(':')
+      .map(|(transport, param)| (transport.trim(), param.trim()))
+      .unwrap_or((ledger_type, ""));
+    let parsed_name = format!("{}:{}", transport, param);
+
+    Ok(match self.ledgers.entry(parsed_name) {
       Entry::Occupied(entry) => entry.get().clone(),
       Entry::Vacant(entry) => {
         log::info!("Create new ledger: {}", ledger_type);
-        let ledger = match ledger_type {
+        let ledger = match transport {
           "HID" => Ledger::new_hid()?,
+          "tcp" => Ledger::new_tcp(param)?,
           _ => {
             panic!("Unsupported ledger type: {}", ledger_type);
           }
