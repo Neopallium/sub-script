@@ -3,7 +3,7 @@ pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 #[cfg(not(feature = "no_optimize"))]
 use rhai::OptimizationLevel;
 
-use crate::{client, metadata, types, users, plugins};
+use crate::{client, metadata, plugins, types, users};
 
 pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   fn eprint_line(lines: &[&str], pos: Position, err_msg: &str) {

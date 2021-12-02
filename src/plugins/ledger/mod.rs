@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::convert::TryFrom;
+use std::sync::{Arc, RwLock};
 
 use byteorder::{LittleEndian, WriteBytesExt};
 
@@ -18,9 +18,9 @@ use ledger_transport::APDUTransport;
 use sp_core::Encode;
 
 use crate::client::{Client, ExtrinsicCallResult};
-use crate::users::AccountId;
-use crate::types::TypeLookup;
 use crate::metadata::EncodedCall;
+use crate::types::TypeLookup;
+use crate::users::AccountId;
 
 pub const HIGH_BIT: u32 = 0x8000_0000;
 pub const CHUNK_SIZE: usize = 250;
@@ -50,18 +50,15 @@ pub struct Ledger {
 
 impl Ledger {
   pub fn new_hid() -> Result<Self, Box<EvalAltResult>> {
-    let transport = ledger::TransportNativeHID::new()
-      .map_err(|e| e.to_string())?;
+    let transport = ledger::TransportNativeHID::new().map_err(|e| e.to_string())?;
     Ok(Self {
-      transport: Arc::new(APDUTransport::new(transport))
+      transport: Arc::new(APDUTransport::new(transport)),
     })
   }
 
   pub fn exchange(&self, command: APDUCommand) -> Result<APDUAnswer, Box<EvalAltResult>> {
     log::debug!("Ledger cmd: {:?}", command);
-    Ok(futures::executor::block_on(
-      self.transport.exchange(&command)
-    ).map_err(|e| e.to_string())?)
+    Ok(futures::executor::block_on(self.transport.exchange(&command)).map_err(|e| e.to_string())?)
   }
 }
 
@@ -79,17 +76,25 @@ impl AddressBip44 {
       slip0044,
       account,
       change,
-      address_index
+      address_index,
     }
   }
 
   pub fn encode(&self) -> Vec<u8> {
     let mut buf = Vec::new();
     buf.write_u32::<LittleEndian>(HIGH_BIT | 44).unwrap();
-    buf.write_u32::<LittleEndian>(HIGH_BIT | self.slip0044).unwrap();
-    buf.write_u32::<LittleEndian>(HIGH_BIT | self.account).unwrap();
-    buf.write_u32::<LittleEndian>(HIGH_BIT | self.change).unwrap();
-    buf.write_u32::<LittleEndian>(HIGH_BIT | self.address_index).unwrap();
+    buf
+      .write_u32::<LittleEndian>(HIGH_BIT | self.slip0044)
+      .unwrap();
+    buf
+      .write_u32::<LittleEndian>(HIGH_BIT | self.account)
+      .unwrap();
+    buf
+      .write_u32::<LittleEndian>(HIGH_BIT | self.change)
+      .unwrap();
+    buf
+      .write_u32::<LittleEndian>(HIGH_BIT | self.address_index)
+      .unwrap();
     buf
   }
 }
@@ -123,7 +128,13 @@ impl SubstrateApp {
     Ok(app)
   }
 
-  fn send_cmd(&self, ins: u8, p1: u8, p2: u8, data: Vec<u8>) -> Result<Vec<u8>, Box<EvalAltResult>> {
+  fn send_cmd(
+    &self,
+    ins: u8,
+    p1: u8,
+    p2: u8,
+    data: Vec<u8>,
+  ) -> Result<Vec<u8>, Box<EvalAltResult>> {
     Ok(Self::is_error(self.ledger.exchange(APDUCommand {
       cla: self.cla,
       ins,
@@ -135,12 +146,7 @@ impl SubstrateApp {
 
   fn update_account(&mut self) -> Result<(), Box<EvalAltResult>> {
     // Initial command.
-    let res = self.send_cmd(
-      INS_GET_ADDR,
-      0x00,
-      self.scheme,
-      self.address.encode(),
-    )?;
+    let res = self.send_cmd(INS_GET_ADDR, 0x00, self.scheme, self.address.encode())?;
 
     let len = res.len();
     log::debug!("-- GET_ADDR: len={}", len);
@@ -149,7 +155,11 @@ impl SubstrateApp {
     log::debug!("  -- address: {:?}", address);
 
     self.nonce = self.client.get_nonce(self.account_id.clone())?.unwrap_or(0);
-    log::debug!("  Leaded nonce[{}] for account: {:?}", self.nonce, self.account_id);
+    log::debug!(
+      "  Leaded nonce[{}] for account: {:?}",
+      self.nonce,
+      self.account_id
+    );
     Ok(())
   }
 
@@ -157,7 +167,12 @@ impl SubstrateApp {
     self.account_id.clone()
   }
 
-  pub fn set_address(&mut self, account: u32, change: u32, address_index: u32) -> Result<(), Box<EvalAltResult>> {
+  pub fn set_address(
+    &mut self,
+    account: u32,
+    change: u32,
+    address_index: u32,
+  ) -> Result<(), Box<EvalAltResult>> {
     self.address = AddressBip44::new(self.slip0044, account, change, address_index);
     self.update_account()
   }
@@ -173,12 +188,7 @@ impl SubstrateApp {
 
   pub fn sign(&self, data: Vec<u8>) -> Result<Vec<u8>, Box<EvalAltResult>> {
     // Initial command.  First chunk.
-    let mut resp = self.send_cmd(
-      INS_SIGN,
-      SIGN_INIT,
-      self.scheme,
-      self.address.encode(),
-    )?;
+    let mut resp = self.send_cmd(INS_SIGN, SIGN_INIT, self.scheme, self.address.encode())?;
 
     // Message chunks.
     let mut chunks = data.chunks(CHUNK_SIZE).peekable();
@@ -188,12 +198,7 @@ impl SubstrateApp {
       } else {
         SIGN_LAST
       };
-      resp = self.send_cmd(
-        INS_SIGN,
-        p1,
-        self.scheme,
-        chunk.into(),
-      )?;
+      resp = self.send_cmd(INS_SIGN, p1, self.scheme, chunk.into())?;
     }
 
     Ok(resp)
@@ -205,19 +210,17 @@ impl SubstrateApp {
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     let era_nonce = GenericExtra::new(generic::Era::Immortal, self.nonce);
     let call = call.into_call();
-    let payload = SignedPayload::from_raw(
-      &call, &era_nonce, self.client.get_signed_extra()
-    );
+    let payload = SignedPayload::from_raw(&call, &era_nonce, self.client.get_signed_extra());
 
     let signature = self.sign(payload.encode())?;
-    log::debug!("signature res: len={}, sig[0]={}", signature.len(), signature[0]);
+    log::debug!(
+      "signature res: len={}, sig[0]={}",
+      signature.len(),
+      signature[0]
+    );
     let sig = match self.scheme {
-      SCHEME_ED25519 => {
-        ed25519::Signature::from_slice(&signature[1..]).into()
-      }
-      SCHEME_SR25519 => {
-        sr25519::Signature::from_slice(&signature[1..]).into()
-      }
+      SCHEME_ED25519 => ed25519::Signature::from_slice(&signature[1..]).into(),
+      SCHEME_SR25519 => sr25519::Signature::from_slice(&signature[1..]).into(),
       scheme => {
         panic!("Unsupported signature scheme: {}", scheme);
       }
@@ -279,9 +282,7 @@ impl LedgerApps {
       Entry::Vacant(entry) => {
         log::info!("Create new ledger: {}", ledger_type);
         let ledger = match ledger_type {
-          "HID" => {
-            Ledger::new_hid()?
-          }
+          "HID" => Ledger::new_hid()?,
           _ => {
             panic!("Unsupported ledger type: {}", ledger_type);
           }
@@ -296,7 +297,8 @@ impl LedgerApps {
     use std::collections::hash_map::Entry;
 
     // Normalize name for lookup.
-    let (app_name, ledger_type) = ledger_app.split_once(':')
+    let (app_name, ledger_type) = ledger_app
+      .split_once(':')
       .map(|(app, ledger)| (app.trim(), ledger.trim()))
       .ok_or_else(|| format!("Failed to parse ledger_app: {}", ledger_app))?;
     let parsed_name = format!("{}:{}", app_name, ledger_type);
@@ -309,9 +311,7 @@ impl LedgerApps {
       Entry::Vacant(entry) => {
         log::info!("Create new ledger app: {}", app_name);
         let app = match app_name {
-          "Polymesh" => {
-            SubstrateApp::new_polymesh(ledger, self.client.clone())?
-          }
+          "Polymesh" => SubstrateApp::new_polymesh(ledger, self.client.clone())?,
           _ => {
             panic!("Unsupported ledger app: {}", app_name);
           }

@@ -20,4 +20,3 @@ pub fn init_scope(
 
   Ok(())
 }
-
