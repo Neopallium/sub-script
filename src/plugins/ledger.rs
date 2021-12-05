@@ -1,9 +1,9 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::{Arc, RwLock};
-use std::net::TcpStream;
 use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::{Arc, RwLock};
 
 use rhai::{Dynamic, Engine, EvalAltResult, Scope};
 
@@ -74,7 +74,13 @@ impl LedgerSyncTransport for TransportTcp {
     sock.read_exact(&mut buf).map_err(|e| e.to_string())?;
     let packet_len = u32::from_be_bytes(buf) + 2;
     if packet_len > MAX_PACKET_LEN {
-      return Err(format!("APDU Packet is too large: {} > {}", packet_len, MAX_PACKET_LEN).into());
+      return Err(
+        format!(
+          "APDU Packet is too large: {} > {}",
+          packet_len, MAX_PACKET_LEN
+        )
+        .into(),
+      );
     }
     let mut buf = vec![0u8; packet_len as usize];
     sock.read_exact(&mut buf).map_err(|e| e.to_string())?;
