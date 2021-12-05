@@ -217,6 +217,14 @@ impl TypeRef {
   pub fn decode_mut(&mut self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
     self.decode(data)
   }
+
+  pub fn is_u8(&self) -> bool {
+    let self_meta = self.0.read().unwrap();
+    match &*self_meta {
+      TypeMeta::Integer(1, false) => true,
+      _ => false,
+    }
+  }
 }
 
 impl From<TypeMeta> for TypeRef {
@@ -444,17 +452,42 @@ impl TypeMeta {
           for value in values.into_iter() {
             type_ref.encode_value(value, data)?
           }
-        } else {
-          if *len == 32 && value.is::<SharedUser>() {
+          return Ok(());
+        } else if type_ref.is_u8() {
+          let type_id = value.type_id();
+          // Handle fixed-length byte arrays: [u8; len]
+          if type_id == TypeId::of::<SharedUser>() && *len == 32 {
             let user = value.cast::<SharedUser>();
             data.encode(user.public());
-          } else {
-            Err(format!(
-              "Unhandled slice type: {:?}, value={:?}",
-              self, value
-            ))?;
+            return Ok(());
+          } else if type_id == TypeId::of::<ImmutableString>() {
+            let s = value.into_immutable_string()?;
+            if s.len() == *len {
+              // Write fixed-length string as bytes.
+              data.write(s.as_bytes());
+            } else if s.len() >= (*len * 2) {
+              // Maybe Hex-encoded string.
+              let bytes = if s.starts_with("0x") {
+                hex::decode(&s.as_bytes()[2..]).map_err(|e| e.to_string())?
+              } else {
+                hex::decode(s.as_bytes()).map_err(|e| e.to_string())?
+              };
+              data.write(&bytes[..]);
+            } else {
+              // Failed to convert string to fixed-length byte array.
+              return Err(format!(
+                "Unhandled slice type: {:?}, from string='{}'",
+                self, s
+              ))?;
+            }
+            return Ok(());
           }
         }
+        // Unhandled slice type.
+        return Err(format!(
+          "Unhandled slice type: {:?}, value={:?}",
+          self, value
+        ))?;
       }
       TypeMeta::String => {
         let s = value.into_immutable_string()?;
@@ -1188,7 +1221,7 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
   types.custom_encode("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
     let value = value.cast::<ImmutableString>();
     if value.len() == 12 {
-      data.encode(value.as_str());
+      data.write(value.as_bytes());
     } else {
       let mut ticker = [0u8; 12];
       for (idx, b) in value.as_str().as_bytes().iter().take(12).enumerate() {

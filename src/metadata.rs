@@ -636,6 +636,10 @@ impl EncodedArgs {
     val.encode_to(&mut self.data)
   }
 
+  pub fn write(&mut self, bytes: &[u8]) {
+    self.data.extend(bytes);
+  }
+
   pub fn len(&mut self) -> i64 {
     self.data.len() as i64
   }
