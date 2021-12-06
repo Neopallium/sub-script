@@ -190,6 +190,21 @@ impl InnerClient {
     )
   }
 
+  pub fn get_storage_map(
+    &self,
+    prefix: &str,
+    key_name: &str,
+    map_key: Vec<u8>,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    Ok(
+      self
+        .api
+        .get_storage_map(prefix, key_name, map_key, at_block)
+        .map_err(|e| e.to_string())?,
+    )
+  }
+
   pub fn get_events(&self, block: Option<Hash>) -> Result<Dynamic, Box<EvalAltResult>> {
     match self.get_storage_value("System", "Events", block)? {
       Some(value) => {
@@ -290,23 +305,30 @@ impl Client {
   }
 
   pub fn get_storage_value(
-    &mut self,
+    &self,
     prefix: &str,
     key_name: &str,
     at_block: Option<Hash>,
-  ) -> Result<Dynamic, Box<EvalAltResult>> {
-    let value = self
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    self
       .inner
       .read()
       .unwrap()
-      .get_storage_value(prefix, key_name, at_block)?;
-    match value {
-      Some(value) => {
-        let data = Vec::from(&*value);
-        Ok(Dynamic::from(data))
-      }
-      None => Ok(Dynamic::UNIT),
-    }
+      .get_storage_value(prefix, key_name, at_block)
+  }
+
+  pub fn get_storage_map(
+    &self,
+    prefix: &str,
+    key_name: &str,
+    map_key: Vec<u8>,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_storage_map(prefix, key_name, map_key, at_block)
   }
 
   pub fn get_events(&self, block: Option<Hash>) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -468,7 +490,6 @@ impl ExtrinsicCallResult {
 pub fn init_engine(engine: &mut Engine) {
   engine
     .register_type_with_name::<Client>("Client")
-    .register_result_fn("get_storage_value", Client::get_storage_value)
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
     .register_fn("print_metadata", Client::print_metadata)
     .register_type_with_name::<Block>("Block")

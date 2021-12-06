@@ -5,6 +5,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[patch.crates-io]
+schnorrkel = { git = "https://github.com/PolymathNetwork/schnorrkel", branch = "rebase-head" }
+
 [dependencies]
 anyhow = "1.0.44"
 log = "0.4"
@@ -32,3 +35,41 @@ smartstring = "0.2.9"
 # Ledger
 ledger-transport-hid = "0.8.0"
 ledger-apdu = "0.8.0"
+
+# Polymesh
+confidential_identity = { git = "https://github.com/PolymathNetwork/cryptography.git", default-features = false, tag = "confidential-identity-v2.0.0", optional = true }
+confidential_identity_v1 = { package = "confidential_identity", git = "https://github.com/PolymathNetwork/cryptography.git", default-features = false, tag = "confidential-identity-v1.1.3", optional = true }
+cryptography_core = { git = "https://github.com/PolymathNetwork/cryptography.git", default-features = false, tag = "confidential-identity-v1.1.3", optional = true }
+polymesh-primitives = { git = "https://github.com/PolymathNetwork/Polymesh", branch = "develop", default-features = false, optional = true }
+
+[features]
+default = [ "std", "polymesh" ]
+
+# Backends
+u64_backend = [ "confidential_identity_v1/u64_backend", "cryptography_core/u64_backend"]
+#avx2_backend = [ "confidential_identity_v1/avx2_backend", "cryptography_core/avx2_backend"]
+
+# Polymesh
+polymesh = [
+	"confidential_identity",
+	"confidential_identity_v1",
+	"cryptography_core",
+	"polymesh-primitives",
+]
+
+no_std = [
+	"u64_backend",
+	"confidential_identity/no_std",
+	"confidential_identity_v1/no_std",
+	"cryptography_core/no_std",
+	"polymesh-primitives/no_std",
+]
+
+std = [
+	"u64_backend",
+	"confidential_identity/std",
+	"confidential_identity_v1/std",
+	"cryptography_core/no_std",
+	"cryptography_core/std",
+	"polymesh-primitives/std",
+]

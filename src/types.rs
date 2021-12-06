@@ -1211,26 +1211,6 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
     data.encode(user.public());
     Ok(())
   })?;
-  types.custom_encode("Signatory", TypeId::of::<SharedUser>(), |value, data| {
-    let user = value.cast::<SharedUser>();
-    // Encode variant idx.
-    data.encode(1u8); // Signatory::Account
-    data.encode(user.public());
-    Ok(())
-  })?;
-  types.custom_encode("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
-    let value = value.cast::<ImmutableString>();
-    if value.len() == 12 {
-      data.write(value.as_bytes());
-    } else {
-      let mut ticker = [0u8; 12];
-      for (idx, b) in value.as_str().as_bytes().iter().take(12).enumerate() {
-        ticker[idx] = *b;
-      }
-      data.encode(&ticker);
-    }
-    Ok(())
-  })?;
 
   let lookup = TypeLookup::from_types(types);
   scope.push_constant("Types", lookup.clone());
