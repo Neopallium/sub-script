@@ -10,6 +10,9 @@ pub use client::*;
 pub mod types;
 pub use types::*;
 
+pub mod storage;
+pub use storage::*;
+
 pub mod metadata;
 pub use metadata::*;
 

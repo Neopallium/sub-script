@@ -14,7 +14,7 @@ use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, INT};
 use crate::client::Client;
 use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
 
-fn decode<B: 'static, O: 'static>(
+fn decode_meta<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
 ) -> Result<&O, Box<EvalAltResult>> {
   match encoded {
@@ -34,10 +34,10 @@ impl Metadata {
     // Get runtime metadata.
     let metadata_prefixed = client.get_metadata()?;
 
-    Self::decode(metadata_prefixed, lookup)
+    Self::from_meta(metadata_prefixed, lookup)
   }
 
-  pub fn decode(
+  pub fn from_meta(
     metadata_prefixed: RuntimeMetadataPrefixed,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
@@ -63,10 +63,10 @@ impl Metadata {
     let mut mod_errors = EnumVariants::new();
 
     // Decode module metadata.
-    decode(&md.modules)?
+    decode_meta(&md.modules)?
       .iter()
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
-        let m = ModuleMetadata::decode(m, lookup)?;
+        let m = ModuleMetadata::from_meta(m, lookup)?;
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
         mod_errors.insert_at(m.index, &name, m.error_ref.clone());
@@ -98,6 +98,10 @@ impl Metadata {
 
   fn modules(&mut self) -> Vec<Dynamic> {
     self.modules.values().cloned().map(Dynamic::from).collect()
+  }
+
+  pub fn get_module(&self, name: &str) -> Option<&ModuleMetadata> {
+    self.modules.get(name)
   }
 
   fn find_error(&self, mod_idx: INT, err_idx: INT) -> Dynamic {
@@ -135,12 +139,12 @@ pub struct ModuleMetadata {
 }
 
 impl ModuleMetadata {
-  fn decode(
+  fn from_meta(
     md: &frame_metadata::ModuleMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let mod_idx = md.index;
-    let mod_name = decode(&md.name)?;
+    let mod_name = decode_meta(&md.name)?;
     let mut module = Self {
       name: mod_name.clone(),
       index: mod_idx,
@@ -157,9 +161,9 @@ impl ModuleMetadata {
 
     // Decode module functions.
     if let Some(calls) = &md.calls {
-      decode(calls)?.iter().enumerate().try_for_each(
+      decode_meta(calls)?.iter().enumerate().try_for_each(
         |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let func = FuncMetadata::decode(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
+          let func = FuncMetadata::from_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
           let name = func.name.clone();
           module.funcs.insert(name, func);
           Ok(())
@@ -169,12 +173,12 @@ impl ModuleMetadata {
 
     // Decode module storage.
     if let Some(storage) = &md.storage {
-      let md = decode(storage)?;
-      let mod_prefix = decode(&md.prefix)?;
-      decode(&md.entries)?
+      let md = decode_meta(storage)?;
+      let mod_prefix = decode_meta(&md.prefix)?;
+      decode_meta(&md.entries)?
         .iter()
         .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-          let storage = StorageMetadata::decode(mod_prefix, md, lookup)?;
+          let storage = StorageMetadata::from_meta(mod_prefix, md, lookup)?;
           let name = storage.name.clone();
           module.storage.insert(name, storage);
           Ok(())
@@ -187,10 +191,10 @@ impl ModuleMetadata {
       // Module RawEvent type.
       let mut raw_events = EnumVariants::new();
 
-      decode(events)?.iter().enumerate().try_for_each(
+      decode_meta(events)?.iter().enumerate().try_for_each(
         |(event_idx, md)| -> Result<(), Box<EvalAltResult>> {
           let (event, ty_ref) =
-            EventMetadata::decode(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
+            EventMetadata::from_meta(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
           let name = event.name.clone();
           raw_events.insert_at(event.event_idx, &name, ty_ref);
           module.events.insert(name, event);
@@ -204,9 +208,9 @@ impl ModuleMetadata {
     }
 
     // Decode module constants.
-    decode(&md.constants)?.iter().enumerate().try_for_each(
+    decode_meta(&md.constants)?.iter().enumerate().try_for_each(
       |(const_idx, md)| -> Result<(), Box<EvalAltResult>> {
-        let constant = ConstMetadata::decode(&mod_name, mod_idx, const_idx as u8, md, lookup)?;
+        let constant = ConstMetadata::from_meta(&mod_name, mod_idx, const_idx as u8, md, lookup)?;
         let name = constant.name.clone();
         module.constants.insert(name, constant);
         Ok(())
@@ -217,9 +221,9 @@ impl ModuleMetadata {
     // Module RawError type.
     let mut raw_errors = EnumVariants::new();
 
-    decode(&md.errors)?.iter().enumerate().try_for_each(
+    decode_meta(&md.errors)?.iter().enumerate().try_for_each(
       |(error_idx, md)| -> Result<(), Box<EvalAltResult>> {
-        let error = ErrorMetadata::decode(&mod_name, mod_idx, error_idx as u8, md)?;
+        let error = ErrorMetadata::from_meta(&mod_name, mod_idx, error_idx as u8, md)?;
         let name = error.name.clone();
         raw_errors.insert_at(error.error_idx, &name, None);
         module.err_idx_map.insert(error.error_idx, name.clone());
@@ -292,6 +296,10 @@ impl ModuleMetadata {
     self.storage.values().cloned().map(Dynamic::from).collect()
   }
 
+  pub fn get_storage(&self, name: &str) -> Option<&StorageMetadata> {
+    self.storage.get(name)
+  }
+
   fn to_string(&mut self) -> String {
     format!("ModuleMetadata: {}", self.name)
   }
@@ -328,8 +336,12 @@ impl NamedType {
     Ok(named)
   }
 
-  fn encode_value(&self, param: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(&self, param: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
     self.ty_meta.encode_value(param, data)
+  }
+
+  pub fn decode(&self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.ty_meta.decode(data)
   }
 
   fn get_name(&mut self) -> String {
@@ -347,21 +359,50 @@ impl NamedType {
 
 #[derive(Debug, Clone)]
 pub struct KeyHasher {
-  hashers: Vec<StorageHasher>,
-  types: Vec<NamedType>,
+  pub hashers: Vec<StorageHasher>,
+  pub types: Vec<NamedType>,
+}
+
+impl KeyHasher {
+  pub fn encode_map_key(&self, key: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+    let mut buf = EncodedArgs::new();
+    match self.types.len() {
+      0 => Err(format!("This storage isn't a map type."))?,
+      1 => {
+        self.types[0].encode_value(key, &mut buf)?;
+      },
+      _ => {
+        Err(format!("This storage isn't a double map type."))?;
+      },
+    }
+    Ok(buf.into_inner())
+  }
+
+  pub fn encode_double_map_key(&self, key1: Dynamic, key2: Dynamic) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
+    let mut buf1 = EncodedArgs::new();
+    let mut buf2 = EncodedArgs::new();
+    match self.types.len() {
+      2 => {
+        self.types[0].encode_value(key1, &mut buf1)?;
+        self.types[1].encode_value(key2, &mut buf2)?;
+      },
+      _ => Err(format!("This storage isn't a double map type."))?,
+    }
+    Ok((buf1.into_inner(), buf2.into_inner()))
+  }
 }
 
 #[derive(Clone)]
 pub struct StorageMetadata {
-  prefix: String,
-  name: String,
-  key_hasher: Option<KeyHasher>,
-  value_ty: NamedType,
-  docs: Docs,
+  pub prefix: String,
+  pub name: String,
+  pub key_hasher: Option<KeyHasher>,
+  pub value_ty: NamedType,
+  pub docs: Docs,
 }
 
 impl StorageMetadata {
-  fn decode(
+  fn from_meta(
     prefix: &str,
     md: &frame_metadata::StorageEntryMetadata,
     lookup: &TypeLookup,
@@ -373,7 +414,7 @@ impl StorageMetadata {
       } => {
         let hasher = KeyHasher {
           hashers: vec![hasher.clone()],
-          types: vec![NamedType::new(decode(key)?, lookup)?],
+          types: vec![NamedType::new(decode_meta(key)?, lookup)?],
         };
         (Some(hasher), value.clone())
       }
@@ -387,8 +428,8 @@ impl StorageMetadata {
         let hasher = KeyHasher {
           hashers: vec![hasher.clone(), key2_hasher.clone()],
           types: vec![
-            NamedType::new(decode(key1)?, lookup)?,
-            NamedType::new(decode(key2)?, lookup)?,
+            NamedType::new(decode_meta(key1)?, lookup)?,
+            NamedType::new(decode_meta(key2)?, lookup)?,
           ],
         };
         (Some(hasher), value.clone())
@@ -396,13 +437,31 @@ impl StorageMetadata {
     };
     let storage = Self {
       prefix: prefix.into(),
-      name: decode(&md.name)?.clone(),
+      name: decode_meta(&md.name)?.clone(),
       key_hasher,
-      value_ty: NamedType::new(decode(&value)?, lookup)?,
-      docs: Docs::decode(&md.documentation)?,
+      value_ty: NamedType::new(decode_meta(&value)?, lookup)?,
+      docs: Docs::from_meta(&md.documentation)?,
     };
 
     Ok(storage)
+  }
+
+  pub fn encode_map_key(&self, key: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(hasher) => hasher.encode_map_key(key),
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
+  }
+
+  pub fn encode_double_map_key(&self, key1: Dynamic, key2: Dynamic) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(hasher) => hasher.encode_double_map_key(key1, key2),
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
+  }
+
+  pub fn decode_value(&self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.value_ty.decode(data)
   }
 
   fn title(&mut self) -> String {
@@ -425,33 +484,31 @@ impl StorageMetadata {
 pub struct EventMetadata {
   mod_name: String,
   name: String,
-  mod_idx: u8,
   event_idx: u8,
   args: Vec<NamedType>,
   docs: Docs,
 }
 
 impl EventMetadata {
-  fn decode(
+  fn from_meta(
     mod_name: &str,
-    mod_idx: u8,
+    _mod_idx: u8,
     event_idx: u8,
     md: &frame_metadata::EventMetadata,
     lookup: &TypeLookup,
   ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut event = Self {
       mod_name: mod_name.into(),
-      name: decode(&md.name)?.clone(),
-      mod_idx,
+      name: decode_meta(&md.name)?.clone(),
       event_idx,
       args: Vec::new(),
-      docs: Docs::decode(&md.documentation)?,
+      docs: Docs::from_meta(&md.documentation)?,
     };
 
     let mut event_tuple = Vec::new();
 
     // Decode event arguments.
-    decode(&md.arguments)?
+    decode_meta(&md.arguments)?
       .iter()
       .try_for_each(|name| -> Result<(), Box<EvalAltResult>> {
         let arg = NamedType::new(name, lookup)?;
@@ -502,29 +559,25 @@ impl EventMetadata {
 pub struct ConstMetadata {
   mod_name: String,
   name: String,
-  mod_idx: u8,
-  const_idx: u8,
   const_ty: NamedType,
   docs: Docs,
 }
 
 impl ConstMetadata {
-  fn decode(
+  fn from_meta(
     mod_name: &str,
-    mod_idx: u8,
-    const_idx: u8,
+    _mod_idx: u8,
+    _const_idx: u8,
     md: &frame_metadata::ModuleConstantMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
-    let ty = decode(&md.ty)?;
+    let ty = decode_meta(&md.ty)?;
     let const_ty = NamedType::new(ty, lookup)?;
     Ok(Self {
       mod_name: mod_name.into(),
-      name: decode(&md.name)?.clone(),
-      mod_idx,
-      const_idx,
+      name: decode_meta(&md.name)?.clone(),
       const_ty,
-      docs: Docs::decode(&md.documentation)?,
+      docs: Docs::from_meta(&md.documentation)?,
     })
   }
 
@@ -550,24 +603,22 @@ impl ConstMetadata {
 pub struct ErrorMetadata {
   mod_name: String,
   name: String,
-  mod_idx: u8,
   error_idx: u8,
   docs: Docs,
 }
 
 impl ErrorMetadata {
-  fn decode(
+  fn from_meta(
     mod_name: &str,
-    mod_idx: u8,
+    _mod_idx: u8,
     error_idx: u8,
     md: &frame_metadata::ErrorMetadata,
   ) -> Result<Self, Box<EvalAltResult>> {
     Ok(Self {
       mod_name: mod_name.into(),
-      name: decode(&md.name)?.clone(),
-      mod_idx,
+      name: decode_meta(&md.name)?.clone(),
       error_idx,
-      docs: Docs::decode(&md.documentation)?,
+      docs: Docs::from_meta(&md.documentation)?,
     })
   }
 
@@ -688,7 +739,7 @@ pub struct FuncMetadata {
 }
 
 impl FuncMetadata {
-  fn decode(
+  fn from_meta(
     mod_name: &str,
     mod_idx: u8,
     func_idx: u8,
@@ -697,18 +748,18 @@ impl FuncMetadata {
   ) -> Result<Self, Box<EvalAltResult>> {
     let mut func = Self {
       mod_name: mod_name.into(),
-      name: decode(&md.name)?.clone(),
+      name: decode_meta(&md.name)?.clone(),
       mod_idx,
       func_idx,
       args: Vec::new(),
-      docs: Docs::decode(&md.documentation)?,
+      docs: Docs::from_meta(&md.documentation)?,
     };
 
     // Decode function arguments.
-    decode(&md.arguments)?
+    decode_meta(&md.arguments)?
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-        let arg = FuncArg::decode(md, lookup)?;
+        let arg = FuncArg::from_meta(md, lookup)?;
         func.args.push(arg);
         Ok(())
       })?;
@@ -792,13 +843,13 @@ pub struct FuncArg {
 }
 
 impl FuncArg {
-  fn decode(
+  fn from_meta(
     md: &FunctionArgumentMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let arg = Self {
-      name: decode(&md.name)?.clone(),
-      ty: NamedType::new(decode(&md.ty)?, lookup)?,
+      name: decode_meta(&md.name)?.clone(),
+      ty: NamedType::new(decode_meta(&md.ty)?, lookup)?,
     };
 
     Ok(arg)
@@ -831,9 +882,9 @@ pub struct Docs {
 }
 
 impl Docs {
-  fn decode(md: &DecodeDifferentArray<&'static str, String>) -> Result<Self, Box<EvalAltResult>> {
+  fn from_meta(md: &DecodeDifferentArray<&'static str, String>) -> Result<Self, Box<EvalAltResult>> {
     Ok(Self {
-      lines: decode(md)?.clone(),
+      lines: decode_meta(md)?.clone(),
     })
   }
 

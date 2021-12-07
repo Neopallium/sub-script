@@ -205,6 +205,22 @@ impl InnerClient {
     )
   }
 
+  pub fn get_storage_double_map(
+    &self,
+    prefix: &str,
+    storage_name: &str,
+    key1: Vec<u8>,
+    key2: Vec<u8>,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    Ok(
+      self
+        .api
+        .get_storage_double_map(prefix, storage_name, key1, key2, at_block)
+        .map_err(|e| e.to_string())?,
+    )
+  }
+
   pub fn get_events(&self, block: Option<Hash>) -> Result<Dynamic, Box<EvalAltResult>> {
     match self.get_storage_value("System", "Events", block)? {
       Some(value) => {
@@ -329,6 +345,21 @@ impl Client {
       .read()
       .unwrap()
       .get_storage_map(prefix, key_name, map_key, at_block)
+  }
+
+  pub fn get_storage_double_map(
+    &self,
+    prefix: &str,
+    storage_name: &str,
+    key1: Vec<u8>,
+    key2: Vec<u8>,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_storage_double_map(prefix, storage_name, key1, key2, at_block)
   }
 
   pub fn get_events(&self, block: Option<Hash>) -> Result<Dynamic, Box<EvalAltResult>> {

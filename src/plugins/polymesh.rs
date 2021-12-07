@@ -9,7 +9,7 @@ use polymesh_primitives::{
   Ticker,
 };
 
-use parity_scale_codec::Encode;
+use parity_scale_codec::{Encode, Decode};
 
 use crate::client::Client;
 use crate::types::TypeLookup;
@@ -124,6 +124,9 @@ pub fn init_engine(
   lookup.custom_encode("IdentityId", TypeId::of::<IdentityId>(), |value, data| {
     data.encode(value.cast::<IdentityId>());
     Ok(())
+  })?;
+  lookup.custom_decode("IdentityId", |mut input| {
+    Ok(Dynamic::from(IdentityId::decode(&mut input)?))
   })?;
   lookup.custom_encode("Ticker", TypeId::of::<ImmutableString>(), |value, data| {
     let value = value.cast::<ImmutableString>();
