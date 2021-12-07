@@ -7,6 +7,14 @@ use rhai::OptimizationLevel;
 
 use crate::{client, metadata, plugins, types, users};
 
+#[derive(Debug, Clone)]
+pub struct EngineOptions {
+  pub url: String,
+  pub substrate_types: String,
+  pub custom_types: String,
+  pub args: Vec<String>,
+}
+
 pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   fn eprint_line(lines: &[&str], pos: Position, err_msg: &str) {
     let line = pos.line().unwrap();
@@ -36,32 +44,39 @@ pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   }
 }
 
-pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltResult>> {
-  let schema = "schema.json";
-
+pub fn init_engine(opts: &EngineOptions) -> Result<Engine, Box<EvalAltResult>> {
   let mut engine = Engine::new();
   let mut globals = HashMap::new();
-  let scope = Scope::new();
 
   #[cfg(not(feature = "no_optimize"))]
   engine.set_optimization_level(OptimizationLevel::Full);
   engine.set_max_expr_depths(64, 64);
 
   // Initialize types, client, users, metadata and plugins.
-  let lookup = types::init_engine(&mut engine, &schema)?;
-  let client = client::init_engine(&mut engine, url, &lookup)?;
+  let lookup = types::init_engine(&mut engine, &opts)?;
+  let client = client::init_engine(&mut engine, &opts.url, &lookup)?;
   let users = users::init_engine(&mut engine, &client);
   metadata::init_engine(&mut engine, &mut globals, &client, &lookup)?;
   plugins::init_engine(&mut engine, &mut globals, &client, &lookup)?;
 
+  // Setup globals for easy access.
   globals.insert("CLIENT".into(), Dynamic::from(client));
   globals.insert("USER".into(), Dynamic::from(users));
   globals.insert("Types".into(), Dynamic::from(lookup));
-  // Globals Hack.
+  // Convert script arguments.
+  let args = opts
+    .args
+    .iter()
+    .cloned()
+    .map(|arg| Dynamic::from(arg))
+    .collect::<Vec<Dynamic>>();
+  globals.insert("ARG".into(), Dynamic::from(args));
+
+  // For easier access to globals.
   engine.on_var(move |name, _, _| {
     let val = globals.get(name).cloned();
     Ok(val)
   });
 
-  Ok((engine, scope))
+  Ok(engine)
 }

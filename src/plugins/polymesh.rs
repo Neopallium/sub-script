@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString};

@@ -17,6 +17,7 @@ use smartstring::{LazyCompact, SmartString};
 
 use indexmap::map::IndexMap;
 
+use super::engine::EngineOptions;
 use super::metadata::EncodedArgs;
 use super::users::{AccountId, SharedUser};
 
@@ -1124,7 +1125,10 @@ impl TypeLookup {
   }
 }
 
-pub fn init_engine(engine: &mut Engine, schema: &str) -> Result<TypeLookup, Box<EvalAltResult>> {
+pub fn init_engine(
+  engine: &mut Engine,
+  opts: &EngineOptions,
+) -> Result<TypeLookup, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<TypeLookup>("TypeLookup")
     .register_fn("dump_types", TypeLookup::dump_types)
@@ -1173,9 +1177,9 @@ pub fn init_engine(engine: &mut Engine, schema: &str) -> Result<TypeLookup, Box<
   types.insert_meta("Option<bool>", TypeMeta::OptionBool);
 
   // Load standard substrate types.
-  types.load_schema("init_types.json")?;
-
-  types.load_schema(schema)?;
+  types.load_schema(&opts.substrate_types)?;
+  // Load custom chain types.
+  types.load_schema(&opts.custom_types)?;
 
   // Custom encodings.
   types.custom_encode("Era", TypeId::of::<Era>(), |value, data| {

@@ -392,7 +392,10 @@ pub fn init_engine(
     .register_type_with_name::<LedgerApps>("LedgerApps")
     .register_result_fn("get_app", LedgerApps::get_app);
 
-  globals.insert("LedgerApps".into(), Dynamic::from(LedgerApps::new(client.clone())));
+  globals.insert(
+    "LedgerApps".into(),
+    Dynamic::from(LedgerApps::new(client.clone())),
+  );
 
   lookup.custom_encode("AccountId", TypeId::of::<SharedApp>(), |value, data| {
     let mut app = value.cast::<SharedApp>();

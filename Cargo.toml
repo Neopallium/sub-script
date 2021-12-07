@@ -13,6 +13,7 @@ anyhow = "1.0.44"
 log = "0.4"
 dotenv = "0.15"
 env_logger = "0.9"
+structopt = "0.3.25"
 
 # substrate
 sp-core = "3.0.0"
