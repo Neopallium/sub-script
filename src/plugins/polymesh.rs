@@ -9,7 +9,7 @@ use polymesh_primitives::{
   Ticker,
 };
 
-use parity_scale_codec::{Encode, Decode};
+use parity_scale_codec::{Decode, Encode};
 
 use crate::client::Client;
 use crate::types::TypeLookup;

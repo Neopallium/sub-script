@@ -5,7 +5,7 @@ pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 #[cfg(not(feature = "no_optimize"))]
 use rhai::OptimizationLevel;
 
-use crate::{client, metadata, plugins, types, users, storage};
+use crate::{client, metadata, plugins, storage, types, users};
 
 #[derive(Debug, Clone)]
 pub struct EngineOptions {

@@ -208,14 +208,15 @@ impl ModuleMetadata {
     }
 
     // Decode module constants.
-    decode_meta(&md.constants)?.iter().enumerate().try_for_each(
-      |(const_idx, md)| -> Result<(), Box<EvalAltResult>> {
+    decode_meta(&md.constants)?
+      .iter()
+      .enumerate()
+      .try_for_each(|(const_idx, md)| -> Result<(), Box<EvalAltResult>> {
         let constant = ConstMetadata::from_meta(&mod_name, mod_idx, const_idx as u8, md, lookup)?;
         let name = constant.name.clone();
         module.constants.insert(name, constant);
         Ok(())
-      },
-    )?;
+      })?;
 
     // Decode module errors.
     // Module RawError type.
@@ -336,7 +337,11 @@ impl NamedType {
     Ok(named)
   }
 
-  pub fn encode_value(&self, param: Dynamic, data: &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> {
+  pub fn encode_value(
+    &self,
+    param: Dynamic,
+    data: &mut EncodedArgs,
+  ) -> Result<(), Box<EvalAltResult>> {
     self.ty_meta.encode_value(param, data)
   }
 
@@ -370,22 +375,26 @@ impl KeyHasher {
       0 => Err(format!("This storage isn't a map type."))?,
       1 => {
         self.types[0].encode_value(key, &mut buf)?;
-      },
+      }
       _ => {
         Err(format!("This storage isn't a double map type."))?;
-      },
+      }
     }
     Ok(buf.into_inner())
   }
 
-  pub fn encode_double_map_key(&self, key1: Dynamic, key2: Dynamic) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
+  pub fn encode_double_map_key(
+    &self,
+    key1: Dynamic,
+    key2: Dynamic,
+  ) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
     let mut buf1 = EncodedArgs::new();
     let mut buf2 = EncodedArgs::new();
     match self.types.len() {
       2 => {
         self.types[0].encode_value(key1, &mut buf1)?;
         self.types[1].encode_value(key2, &mut buf2)?;
-      },
+      }
       _ => Err(format!("This storage isn't a double map type."))?,
     }
     Ok((buf1.into_inner(), buf2.into_inner()))
@@ -453,7 +462,11 @@ impl StorageMetadata {
     }
   }
 
-  pub fn encode_double_map_key(&self, key1: Dynamic, key2: Dynamic) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
+  pub fn encode_double_map_key(
+    &self,
+    key1: Dynamic,
+    key2: Dynamic,
+  ) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
     match &self.key_hasher {
       Some(hasher) => hasher.encode_double_map_key(key1, key2),
       None => Err(format!("This storage type doesn't have keys.").into()),
@@ -882,7 +895,9 @@ pub struct Docs {
 }
 
 impl Docs {
-  fn from_meta(md: &DecodeDifferentArray<&'static str, String>) -> Result<Self, Box<EvalAltResult>> {
+  fn from_meta(
+    md: &DecodeDifferentArray<&'static str, String>,
+  ) -> Result<Self, Box<EvalAltResult>> {
     Ok(Self {
       lines: decode_meta(md)?.clone(),
     })
