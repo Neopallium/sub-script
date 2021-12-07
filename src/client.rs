@@ -11,7 +11,7 @@ use substrate_api_client::rpc::{json_req::*, XtStatus};
 use substrate_api_client::{Api, Hash, StorageValue};
 
 use rhai::serde::from_dynamic;
-use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap};
 
 use crate::metadata::EncodedCall;
 use crate::types::{TypeLookup, TypeRef};
@@ -487,7 +487,11 @@ impl ExtrinsicCallResult {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(
+  engine: &mut Engine,
+  url: &str,
+  lookup: &TypeLookup,
+) -> Result<Client, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<Client>("Client")
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
@@ -508,15 +512,7 @@ pub fn init_engine(engine: &mut Engine) {
     .register_get_result("is_success", ExtrinsicCallResult::is_success)
     .register_get("xthex", ExtrinsicCallResult::xthex)
     .register_fn("to_string", ExtrinsicCallResult::to_string);
-}
 
-pub fn init_scope(
-  url: &str,
-  lookup: &TypeLookup,
-  scope: &mut Scope<'_>,
-) -> Result<Client, Box<EvalAltResult>> {
   let client = Client::connect(url, lookup)?;
-  scope.push_constant("CLIENT", client.clone());
-
   Ok(client)
 }

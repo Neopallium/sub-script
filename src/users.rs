@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use sp_core::{sr25519, Pair};
 use sp_runtime::AccountId32;
 
-use rhai::{Dynamic, Engine, EvalAltResult, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, INT};
 
 use crate::client::{Client, ExtrinsicCallResult};
 use crate::metadata::EncodedCall;
@@ -130,7 +130,7 @@ impl Users {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(engine: &mut Engine, client: &Client) -> Users {
   engine
     .register_type_with_name::<SharedUser>("User")
     .register_get("acc", SharedUser::acc)
@@ -144,8 +144,5 @@ pub fn init_engine(engine: &mut Engine) {
     .register_fn("new_users", Users::new)
     .register_fn("find_by_account", Users::find_by_account)
     .register_indexer_get_result(Users::get_user);
-}
-
-pub fn init_scope(client: &Client, scope: &mut Scope) {
-  scope.push_constant("USER", Users::new(client.clone()));
+  Users::new(client.clone())
 }

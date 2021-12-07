@@ -12,7 +12,7 @@ use sp_runtime::generic::Era;
 
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap, Scope};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap};
 use smartstring::{LazyCompact, SmartString};
 
 use indexmap::map::IndexMap;
@@ -1124,7 +1124,7 @@ impl TypeLookup {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(engine: &mut Engine, schema: &str) -> Result<TypeLookup, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<TypeLookup>("TypeLookup")
     .register_fn("dump_types", TypeLookup::dump_types)
@@ -1155,9 +1155,6 @@ pub fn init_engine(engine: &mut Engine) {
     })
     .register_fn("encode", |era: &mut Era| era.encode())
     .register_fn("to_string", |era: &mut Era| format!("{:?}", era));
-}
-
-pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box<EvalAltResult>> {
   let mut types = Types::new();
 
   // Primitive types.
@@ -1213,6 +1210,5 @@ pub fn init_scope(schema: &str, scope: &mut Scope<'_>) -> Result<TypeLookup, Box
   })?;
 
   let lookup = TypeLookup::from_types(types);
-  scope.push_constant("Types", lookup.clone());
   Ok(lookup)
 }

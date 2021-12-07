@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 
 #[cfg(not(feature = "no_optimize"))]
@@ -38,25 +40,28 @@ pub fn init_engine(url: &str) -> Result<(Engine, Scope<'static>), Box<EvalAltRes
   let schema = "schema.json";
 
   let mut engine = Engine::new();
-  let mut scope = Scope::new();
+  let mut globals = HashMap::new();
+  let scope = Scope::new();
 
   #[cfg(not(feature = "no_optimize"))]
   engine.set_optimization_level(OptimizationLevel::Full);
   engine.set_max_expr_depths(64, 64);
 
-  // Register types with engine.
-  users::init_engine(&mut engine);
-  client::init_engine(&mut engine);
-  types::init_engine(&mut engine);
-  metadata::init_engine(&mut engine);
-  plugins::init_engine(&mut engine);
+  // Initialize types, client, users, metadata and plugins.
+  let lookup = types::init_engine(&mut engine, &schema)?;
+  let client = client::init_engine(&mut engine, url, &lookup)?;
+  let users = users::init_engine(&mut engine, &client);
+  metadata::init_engine(&mut engine, &mut globals, &client, &lookup)?;
+  plugins::init_engine(&mut engine, &mut globals, &client, &lookup)?;
 
-  // Initialize scope with some globals.
-  let lookup = types::init_scope(&schema, &mut scope)?;
-  let client = client::init_scope(url, &lookup, &mut scope)?;
-  users::init_scope(&client, &mut scope);
-  metadata::init_scope(&client, &lookup, &mut engine, &mut scope)?;
-  plugins::init_scope(&client, &lookup, &mut engine, &mut scope)?;
+  globals.insert("CLIENT".into(), Dynamic::from(client));
+  globals.insert("USER".into(), Dynamic::from(users));
+  globals.insert("Types".into(), Dynamic::from(lookup));
+  // Globals Hack.
+  engine.on_var(move |name, _, _| {
+    let val = globals.get(name).cloned();
+    Ok(val)
+  });
 
   Ok((engine, scope))
 }

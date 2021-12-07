@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, RwLock};
 
-use rhai::{Dynamic, Engine, EvalAltResult, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult};
 
 use sp_core::{ed25519, sr25519};
 use sp_runtime::generic;
@@ -379,22 +379,20 @@ impl LedgerApps {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(
+  engine: &mut Engine,
+  globals: &mut HashMap<String, Dynamic>,
+  client: &Client,
+  lookup: &TypeLookup,
+) -> Result<(), Box<EvalAltResult>> {
   engine
     .register_type_with_name::<SharedApp>("LedgerApp")
     .register_get("acc", SharedApp::acc)
     .register_result_fn("submit", SharedApp::submit_call)
     .register_type_with_name::<LedgerApps>("LedgerApps")
     .register_result_fn("get_app", LedgerApps::get_app);
-}
 
-pub fn init_scope(
-  client: &Client,
-  lookup: &TypeLookup,
-  _engine: &mut Engine,
-  scope: &mut Scope<'_>,
-) -> Result<(), Box<EvalAltResult>> {
-  scope.push_constant("LedgerApps", LedgerApps::new(client.clone()));
+  globals.insert("LedgerApps".into(), Dynamic::from(LedgerApps::new(client.clone())));
 
   lookup.custom_encode("AccountId", TypeId::of::<SharedApp>(), |value, data| {
     let mut app = value.cast::<SharedApp>();

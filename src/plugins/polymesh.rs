@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::any::TypeId;
 use std::convert::TryFrom;
 
-use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Scope as RScope};
+use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString};
 
 use polymesh_primitives::{
   investor_zkproof_data::v1::InvestorZKProofData, CddId, Claim, IdentityId, InvestorUid, Scope,
@@ -71,7 +72,12 @@ impl PolymeshUtils {
   }
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(
+  engine: &mut Engine,
+  globals: &mut HashMap<String, Dynamic>,
+  client: &Client,
+  lookup: &TypeLookup,
+) -> Result<(), Box<EvalAltResult>> {
   engine
     .register_type_with_name::<PolymeshUtils>("PolymeshUtils")
     .register_result_fn(
@@ -92,16 +98,9 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<IdentityId>("IdentityId")
     .register_type_with_name::<InvestorUid>("InvestorUid")
     .register_type_with_name::<Ticker>("Ticker");
-}
 
-pub fn init_scope(
-  client: &Client,
-  lookup: &TypeLookup,
-  _engine: &mut Engine,
-  scope: &mut RScope<'_>,
-) -> Result<(), Box<EvalAltResult>> {
   let utils = PolymeshUtils::new(client.clone())?;
-  scope.push_constant("PolymeshUtils", utils.clone());
+  globals.insert("PolymeshUtils".into(), Dynamic::from(utils.clone()));
 
   lookup.custom_encode("Signatory", TypeId::of::<SharedUser>(), |value, data| {
     let user = value.cast::<SharedUser>();

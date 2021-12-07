@@ -9,7 +9,7 @@ use frame_metadata::{
 use parity_scale_codec::{Encode, Output};
 
 use rhai::plugin::NativeCallContext;
-use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, Scope, INT};
+use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, INT};
 
 use crate::client::Client;
 use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
@@ -86,11 +86,11 @@ impl Metadata {
   pub fn add_encode_calls(
     &self,
     engine: &mut Engine,
-    scope: &mut Scope<'_>,
+    globals: &mut HashMap<String, Dynamic>,
   ) -> Result<(), Box<EvalAltResult>> {
     // Register each module as a global constant.
     for (_, module) in &self.modules {
-      module.add_encode_calls(engine, scope)?;
+      module.add_encode_calls(engine, globals)?;
     }
 
     Ok(())
@@ -248,14 +248,14 @@ impl ModuleMetadata {
   pub fn add_encode_calls(
     &self,
     engine: &mut Engine,
-    scope: &mut Scope<'_>,
+    globals: &mut HashMap<String, Dynamic>,
   ) -> Result<(), Box<EvalAltResult>> {
     let mut map = RMap::new();
     for (name, func) in &self.funcs {
       map.insert(name.into(), func.add_encode_calls(engine)?);
     }
 
-    scope.push_dynamic(self.name.clone(), map.into());
+    globals.insert(self.name.clone(), map.into());
     Ok(())
   }
 
@@ -861,7 +861,12 @@ fn encode_call(
   func.encode_call(&args[2..])
 }
 
-pub fn init_engine(engine: &mut Engine) {
+pub fn init_engine(
+  engine: &mut Engine,
+  globals: &mut HashMap<String, Dynamic>,
+  client: &Client,
+  lookup: &TypeLookup,
+) -> Result<Metadata, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<Metadata>("Metadata")
     .register_get("modules", Metadata::modules)
@@ -922,16 +927,8 @@ pub fn init_engine(engine: &mut Engine) {
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
-}
 
-pub fn init_scope(
-  client: &Client,
-  lookup: &TypeLookup,
-  engine: &mut Engine,
-  scope: &mut Scope<'_>,
-) -> Result<Metadata, Box<EvalAltResult>> {
   let metadata = Metadata::new(client, lookup)?;
-  scope.push_constant("METADATA", metadata.clone());
 
   lookup.custom_encode("Call", TypeId::of::<EncodedCall>(), |value, data| {
     let call = value.cast::<EncodedCall>();
@@ -940,7 +937,8 @@ pub fn init_scope(
   })?;
 
   // Register each module as a global constant.
-  metadata.add_encode_calls(engine, scope)?;
+  metadata.add_encode_calls(engine, globals)?;
 
+  globals.insert("METADATA".into(), Dynamic::from(metadata.clone()));
   Ok(metadata)
 }
