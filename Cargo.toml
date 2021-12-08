@@ -24,7 +24,7 @@ substrate-api-client = "0.6.6"
 parity-scale-codec = "2.3.1"
 
 # rhai
-rhai = { version = "1.2", default-features = false, features = ["only_i64", "no_float", "decimal", "serde", "metadata"]}
+rhai = { version = "1.2", default-features = false, features = ["sync", "only_i64", "no_float", "decimal", "serde", "metadata"]}
 indexmap = "1.7.0"
 serde_json = { version = "1.0.68", features = ["preserve_order"] }
 serde = "1.0.130"

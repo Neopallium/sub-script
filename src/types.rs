@@ -72,7 +72,9 @@ impl EnumVariants {
 }
 
 #[derive(Clone)]
-pub struct WrapEncodeFn(Arc<dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>>);
+pub struct WrapEncodeFn(
+  Arc<dyn Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>> + Send + Sync + 'static>,
+);
 
 impl WrapEncodeFn {
   pub fn encode_value(
@@ -104,7 +106,7 @@ impl<'a> Input for BoxedInput<'a> {
 }
 
 #[derive(Clone)]
-pub struct WrapDecodeFn(Arc<dyn Fn(BoxedInput) -> Result<Dynamic, PError>>);
+pub struct WrapDecodeFn(Arc<dyn Fn(BoxedInput) -> Result<Dynamic, PError> + Send + Sync + 'static>);
 
 impl WrapDecodeFn {
   pub fn decode_value<I: Input>(&self, input: &mut I) -> Result<Dynamic, PError> {
@@ -1033,7 +1035,7 @@ impl Types {
     func: F,
   ) -> Result<(), Box<EvalAltResult>>
   where
-    F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
+    F: 'static + Send + Sync + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
   {
     let func = WrapEncodeFn(Arc::new(func));
     let type_ref = self.parse_type(name)?;
@@ -1043,7 +1045,7 @@ impl Types {
 
   pub fn custom_decode<F>(&mut self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
   where
-    F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>,
+    F: 'static + Send + Sync + Fn(BoxedInput) -> Result<Dynamic, PError>,
   {
     let func = WrapDecodeFn(Arc::new(func));
     let type_ref = self.parse_type(name)?;
@@ -1110,7 +1112,7 @@ impl TypeLookup {
     func: F,
   ) -> Result<(), Box<EvalAltResult>>
   where
-    F: 'static + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
+    F: 'static + Send + Sync + Fn(Dynamic, &mut EncodedArgs) -> Result<(), Box<EvalAltResult>>,
   {
     let mut t = self.types.write().unwrap();
     t.custom_encode(name, type_id, func)
@@ -1118,7 +1120,7 @@ impl TypeLookup {
 
   pub fn custom_decode<F>(&self, name: &str, func: F) -> Result<(), Box<EvalAltResult>>
   where
-    F: 'static + Fn(BoxedInput) -> Result<Dynamic, PError>,
+    F: 'static + Send + Sync + Fn(BoxedInput) -> Result<Dynamic, PError>,
   {
     let mut t = self.types.write().unwrap();
     t.custom_decode(name, func)
