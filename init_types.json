@@ -37,10 +37,6 @@
       "Address20": "[u8; 20]"
     }
   },
-  "DispatchErrorModule": {
-    "index": "u8",
-    "error": "u8"
-  },
   "TokenError": {
     "_enum": ["NoFunds", "WouldDie", "BelowMinimum", "CannotCreate", "UnknownAsset", "Frozen", "Unsupported"]
   },

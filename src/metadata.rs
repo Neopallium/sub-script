@@ -78,7 +78,7 @@ impl Metadata {
     let raw_event_ref = lookup.insert_meta("RawEvent", TypeMeta::Enum(mod_events));
     lookup.insert("Event", raw_event_ref);
     let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
-    lookup.insert("Error", raw_error_ref);
+    lookup.insert("DispatchErrorModule", raw_error_ref);
 
     Ok(api_md)
   }
