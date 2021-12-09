@@ -49,6 +49,14 @@ impl PolymeshUtils {
     }
   }
 
+  pub fn make_cdd_claim(did: &mut IdentityId) -> Claim {
+    let uid = InvestorUid::from(confidential_identity_v1::mocked::make_investor_uid(
+      did.as_bytes(),
+    ));
+    let cdd_id = CddId::new_v1(*did, uid);
+    Claim::CustomerDueDiligence(cdd_id)
+  }
+
   pub fn create_investor_uniqueness(
     &mut self,
     mut user: SharedUser,
@@ -93,6 +101,7 @@ pub fn init_engine(
       "create_investor_uniqueness",
       PolymeshUtils::create_investor_uniqueness,
     )
+    .register_fn("make_cdd_claim", PolymeshUtils::make_cdd_claim)
     .register_type_with_name::<Claim>("Claim")
     .register_type_with_name::<InvestorZKProofData>("InvestorZKProofData")
     .register_type_with_name::<IdentityId>("IdentityId")
