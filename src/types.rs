@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 use parity_scale_codec::{Compact, Decode, Encode, Error as PError, Input};
 use serde_json::{Map, Value};
 
-use sp_runtime::generic::Era;
+use sp_runtime::{generic::Era, MultiSignature};
 
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
@@ -1214,6 +1214,15 @@ pub fn init_engine(
     data.encode(user.public());
     Ok(())
   })?;
+
+  types.custom_encode(
+    "MultiSignature",
+    TypeId::of::<MultiSignature>(),
+    |value, data| {
+      data.encode(value.cast::<MultiSignature>());
+      Ok(())
+    },
+  )?;
 
   let lookup = TypeLookup::from_types(types);
   Ok(lookup)

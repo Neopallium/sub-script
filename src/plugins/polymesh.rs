@@ -11,6 +11,8 @@ use polymesh_primitives::{
 
 use parity_scale_codec::{Decode, Encode};
 
+use sp_runtime::MultiSignature;
+
 use crate::client::Client;
 use crate::types::TypeLookup;
 use crate::users::{AccountId, SharedUser};
@@ -155,5 +157,14 @@ pub fn init_engine(
       Ok(())
     },
   )?;
+  lookup.custom_encode(
+    "OffChainSignature",
+    TypeId::of::<MultiSignature>(),
+    |value, data| {
+      data.encode(value.cast::<MultiSignature>());
+      Ok(())
+    },
+  )?;
+
   Ok(())
 }

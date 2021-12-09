@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use sp_core::{sr25519, Pair};
-use sp_runtime::AccountId32;
+use sp_runtime::{AccountId32, MultiSignature};
 
 use rhai::{Dynamic, Engine, EvalAltResult, INT};
 
@@ -48,6 +48,10 @@ impl User {
     self.nonce as INT
   }
 
+  pub fn sign_data(&self, data: Vec<u8>) -> MultiSignature {
+    MultiSignature::Sr25519(self.pair.sign(&data[..]))
+  }
+
   pub fn submit_call(
     &mut self,
     call: EncodedCall,
@@ -79,6 +83,10 @@ impl SharedUser {
 
   fn nonce(&mut self) -> INT {
     self.0.read().unwrap().nonce()
+  }
+
+  pub fn sign_data(&mut self, data: Vec<u8>) -> MultiSignature {
+    self.0.read().unwrap().sign_data(data)
   }
 
   pub fn submit_call(
@@ -136,6 +144,7 @@ pub fn init_engine(engine: &mut Engine, client: &Client) -> Users {
     .register_get("acc", SharedUser::acc)
     .register_get("nonce", SharedUser::nonce)
     .register_fn("to_string", SharedUser::to_string)
+    .register_fn("sign", SharedUser::sign_data)
     .register_result_fn("submit", SharedUser::submit_call)
     .register_type_with_name::<AccountId>("AccountId")
     .register_fn("to_string", |acc: &mut AccountId| acc.to_string())

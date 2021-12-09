@@ -2,5 +2,5 @@
 #
 
 #cargo check && cargo test --lib && cargo build && touch ./scripts/.trip/reload.txt
-cargo check --release --bin run && cargo build --release && touch ./utils/.trip/reload.txt
+cargo build --release --bin run && touch ./utils/.trip/reload.txt
 

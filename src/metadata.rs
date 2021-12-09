@@ -990,6 +990,7 @@ pub fn init_engine(
     .register_type_with_name::<EncodedCall>("EncodedCall")
     .register_fn("len", EncodedCall::len)
     .register_fn("to_string", EncodedCall::to_string)
+    .register_fn("encode", |call: &mut EncodedCall| call.encode())
     .register_type_with_name::<Docs>("Docs")
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
