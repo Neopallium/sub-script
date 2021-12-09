@@ -12,7 +12,7 @@ use sp_runtime::{generic::Era, MultiSignature};
 
 use rust_decimal::{prelude::ToPrimitive, Decimal};
 
-use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap};
+use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map as RMap, INT};
 use smartstring::{LazyCompact, SmartString};
 
 use indexmap::map::IndexMap;
@@ -343,10 +343,9 @@ impl TypeMeta {
             (16, false) => data.encode(num as u128),
             _ => Err(format!("Unsupported integer type: {:?}", self))?,
           }
-        } else if let Some(mut dec) = value.as_decimal().ok() {
+        } else if let Some(dec) = value.as_decimal().ok() {
           match (len, signed) {
             (_, false) if data.is_compact() => {
-              dec *= Decimal::from(1000_000u64);
               let num = dec
                 .to_u128()
                 .ok_or_else(|| format!("Expected unsigned integer"))?;
@@ -393,8 +392,6 @@ impl TypeMeta {
                 .ok_or_else(|| format!("Integer too large for `u64` or negative."))?,
             ),
             (16, signed) => {
-              // TODO: Add support for other decimal scales.
-              dec *= Decimal::from(1000_000u64);
               if *signed {
                 data.encode(
                   dec
@@ -1205,6 +1202,44 @@ pub fn init_engine(
   })?;
   types.custom_decode("AccountId", |mut input| {
     Ok(Dynamic::from(AccountId::decode(&mut input)?))
+  })?;
+
+  // TODO: Add support for other decimal scales.
+  let token_decimals = 6;
+  let balance_scale = 10u128.pow(token_decimals);
+  types.custom_encode("Balance", TypeId::of::<INT>(), move |value, data| {
+    let mut val = value.cast::<INT>() as u128;
+    val *= balance_scale;
+    if data.is_compact() {
+      data.encode(Compact::<u128>(val));
+    } else {
+      data.encode(val);
+    }
+    Ok(())
+  })?;
+  types.custom_encode("Balance", TypeId::of::<Decimal>(), move |value, data| {
+    let mut dec = value.cast::<Decimal>();
+    dec *= Decimal::from(balance_scale);
+    let val = dec
+      .to_u128()
+      .ok_or_else(|| format!("Expected unsigned integer"))?;
+    if data.is_compact() {
+      data.encode(Compact::<u128>(val));
+    } else {
+      data.encode(val);
+    }
+    Ok(())
+  })?;
+  types.custom_decode("Balance", move |mut input| {
+    let mut val = Decimal::from(u128::decode(&mut input)?);
+    val /= Decimal::from(balance_scale);
+    Ok(Dynamic::from_decimal(val))
+  })?;
+  types.custom_decode("Compact<Balance>", move |mut input| {
+    let num = Compact::<u128>::decode(&mut input)?;
+    let mut val = Decimal::from(num.0);
+    val /= Decimal::from(balance_scale);
+    Ok(Dynamic::from_decimal(val))
   })?;
 
   types.custom_encode("MultiAddress", TypeId::of::<SharedUser>(), |value, data| {
