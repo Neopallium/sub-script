@@ -44,9 +44,10 @@ pub fn eprint_error(input: &str, mut err: EvalAltResult) {
   }
 }
 
-pub fn init_engine(opts: &EngineOptions) -> Result<Engine, Box<EvalAltResult>> {
+pub fn init_engine(opts: &EngineOptions) -> Result<(Engine, Scope), Box<EvalAltResult>> {
   let mut engine = Engine::new();
   let mut globals = HashMap::new();
+  let mut scope = Scope::new();
 
   #[cfg(not(feature = "no_optimize"))]
   engine.set_optimization_level(OptimizationLevel::Full);
@@ -72,7 +73,7 @@ pub fn init_engine(opts: &EngineOptions) -> Result<Engine, Box<EvalAltResult>> {
     .cloned()
     .map(|arg| Dynamic::from(arg))
     .collect::<Vec<Dynamic>>();
-  globals.insert("ARG".into(), Dynamic::from(args));
+  scope.push("ARG", args);
 
   // For easier access to globals.
   engine.on_var(move |name, _, _| {
@@ -80,5 +81,5 @@ pub fn init_engine(opts: &EngineOptions) -> Result<Engine, Box<EvalAltResult>> {
     Ok(val)
   });
 
-  Ok(engine)
+  Ok((engine, scope))
 }

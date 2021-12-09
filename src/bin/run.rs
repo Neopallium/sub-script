@@ -43,7 +43,6 @@ fn main() -> Result<()> {
   let opt = Opt::from_args();
 
   let mut contents = String::new();
-  let mut scope = Scope::new();
 
   let filename = match opt.script.as_path().canonicalize() {
     Err(err) => {
@@ -87,7 +86,7 @@ fn main() -> Result<()> {
   };
 
   let engine_opts = opt.into_engine_opts();
-  let engine =
+  let (engine, mut scope) =
     init_engine(&engine_opts).map_err(|e| anyhow!("Failed to initial engine: {:?}", e))?;
 
   if let Err(err) = engine
