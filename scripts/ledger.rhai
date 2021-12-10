@@ -4,6 +4,7 @@ print("Test simple transaction with Ledger app");
 let alice = USER.Alice;
 
 // Polymesh ledger app
+//let app = LedgerApps.get_app("Polymesh: tcp:127.0.0.1:9999");
 let app = LedgerApps.get_app("Polymesh: HID");
 print(`ledger app: ${app}`);
 

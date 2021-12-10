@@ -1,4 +1,4 @@
-import "polymesh" as p;
+import "../scripts/polymesh" as p;
 
 // Test Investor Uniqueness claims.
 print("Identity: Test add investor Uniqueness claim");

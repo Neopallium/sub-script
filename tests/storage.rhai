@@ -1,4 +1,4 @@
-import "polymesh" as p;
+import "../scripts/polymesh" as p;
 
 // Test user.
 let user = USER.Test123;
@@ -7,4 +7,7 @@ let user = USER.Test123;
 p::mock_user(user, 20.0);
 
 let val = STORAGE.map("Identity", "KeyToIdentityIds", user.acc);
+print(`did = ${val}`);
+
+let val = STORAGE.map("System", "Account", user.acc);
 print(`did = ${val}`);
