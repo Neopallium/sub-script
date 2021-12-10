@@ -1,4 +1,4 @@
-import "polymesh" as p;
+import "mod/polymesh" as p;
 
 print("Create assets.");
 

@@ -1,4 +1,4 @@
-import "../scripts/polymesh" as p;
+import "../scripts/mod/polymesh" as p;
 
 // Test user.
 let user = USER.Test123;

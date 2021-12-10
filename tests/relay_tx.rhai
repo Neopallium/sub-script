@@ -1,4 +1,4 @@
-import "../scripts/polymesh" as p;
+import "../scripts/mod/polymesh" as p;
 
 print("Test relay_tx");
 
