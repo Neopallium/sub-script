@@ -23,10 +23,8 @@ It uses [Rhai](https://rhai.rs) for the scripting engine.
 ## Todo
 
 - Subscribe to storage updates.
-- Get storage values.
-- Add hook to auto-initialize new users (to support mocking cdd registration).
 - Add REPL support for quickly making extrinsic calls.
-- Support multiple `Engine` instances with shared User state (for nonces).  This will allow spawning sub-tasks for load testing.
+- Support spawning sub-tasks for load testing.
 - Replace/fix current `substrate-api-client` crate.
 
 ## Examples
