@@ -217,7 +217,6 @@
 		"nonce": "Index",
 		"consumers": "RefCount",
 		"providers": "RefCount",
-		"sufficients": "RefCount",
 		"data": "AccountData"
 	},
 	"MultiSignature": {
