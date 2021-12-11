@@ -4,6 +4,9 @@ pub use engine::*;
 pub mod users;
 pub use users::*;
 
+pub mod rpc;
+pub use rpc::*;
+
 pub mod client;
 pub use client::*;
 
