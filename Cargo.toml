@@ -22,6 +22,7 @@ serde = "1.0.130"
 dashmap = "4.0.2"
 url = "2.2.2"
 ws = "0.9.1"
+crossbeam-channel = "0.5.1"
 
 # substrate
 sp-core = "3.0.0"
