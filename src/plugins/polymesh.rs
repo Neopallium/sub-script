@@ -46,7 +46,9 @@ impl PolymeshUtils {
       .client
       .get_storage_map("Identity", "KeyToIdentityIds", key, None)?
     {
-      Some(value) => Ok(Some(value.decode().map_err(|e| e.to_string())?)),
+      Some(value) => Ok(Some(
+        Decode::decode(&mut value.0.as_slice()).map_err(|e| e.to_string())?,
+      )),
       None => Ok(None),
     }
   }

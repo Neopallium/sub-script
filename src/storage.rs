@@ -25,7 +25,7 @@ impl Storage {
     key: StorageKey,
   ) -> Result<Dynamic, Box<EvalAltResult>> {
     match self.client.get_storage_by_key(key, None)? {
-      Some(value) => md.decode_value((*value).into()),
+      Some(value) => md.decode_value(value.0),
       None => Ok(Dynamic::UNIT),
     }
   }

@@ -35,6 +35,9 @@ for token in tokens {
 }
 client.close_request(sub);
 
+let resp = client.call_method("state_getStorage",["0xcec5070d609dd3497f72bde07fc96ba0e0cdd062e6eaf24295ad4ccfc41d4609"]);
+print(`resp = ${resp}`);
+
 /*
 // Test user.
 let user = USER.Test123;

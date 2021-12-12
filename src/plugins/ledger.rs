@@ -10,13 +10,11 @@ use rhai::{Dynamic, Engine, EvalAltResult};
 use sp_core::{ed25519, sr25519};
 use sp_runtime::generic;
 
-use substrate_api_client::extrinsic::xt_primitives::*;
-
 use ledger_apdu::{APDUAnswer, APDUCommand, APDUErrorCodes};
 
 use sp_core::Encode;
 
-use crate::client::{Client, ExtrinsicCallResult};
+use crate::client::{Client, Extra, ExtrinsicCallResult, ExtrinsicV4, SignedPayload};
 use crate::metadata::EncodedCall;
 use crate::types::TypeLookup;
 use crate::users::AccountId;
@@ -254,9 +252,8 @@ impl SubstrateApp {
     &mut self,
     call: EncodedCall,
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
-    let era_nonce = GenericExtra::new(generic::Era::Immortal, self.nonce);
-    let call = call.into_call();
-    let payload = SignedPayload::from_raw(&call, &era_nonce, self.client.get_signed_extra());
+    let extra = Extra::new(generic::Era::Immortal, self.nonce);
+    let payload = SignedPayload::new(&call, &extra, self.client.get_signed_extra());
 
     let signature = self.sign(payload.encode())?;
     log::debug!(
@@ -273,13 +270,8 @@ impl SubstrateApp {
       }
     };
 
-    let xt = UncheckedExtrinsicV4::new_signed(
-      call,
-      GenericAddress::from(self.account_id.clone()),
-      sig,
-      era_nonce,
-    );
-    let xthex = xt.hex_encode();
+    let xt = ExtrinsicV4::signed(self.account_id.clone(), sig, extra, call);
+    let xthex = xt.to_hex();
 
     let res = self.client.submit(xthex)?;
 

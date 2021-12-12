@@ -58,7 +58,7 @@ pub fn init_engine(opts: &EngineOptions) -> Result<(Engine, Scope), Box<EvalAltR
   let rpc = rpc_manager.get_client(&opts.url)?;
 
   let lookup = types::init_engine(&mut engine, &opts)?;
-  let client = client::init_engine(&rpc, &mut engine, &opts.url, &lookup)?;
+  let client = client::init_engine(&rpc, &mut engine, &lookup)?;
   let users = users::init_engine(&mut engine, &client);
   let metadata = metadata::init_engine(&mut engine, &mut globals, &client, &lookup)?;
   let storage = storage::init_engine(&mut engine, &client, &metadata);
