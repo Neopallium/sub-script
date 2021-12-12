@@ -6,7 +6,17 @@ use frame_metadata::{
   DecodeDifferent, DecodeDifferentArray, FunctionArgumentMetadata, FunctionMetadata,
   RuntimeMetadata, RuntimeMetadataPrefixed, StorageEntryType, StorageHasher, META_RESERVED,
 };
+use frame_support::{
+  StorageHasher as StorageHasherTrait,
+  Blake2_128,
+  Blake2_128Concat,
+  Blake2_256,
+  Twox64Concat,
+  Twox128,
+  Twox256,
+};
 use parity_scale_codec::{Encode, Output};
+use sp_core::{self, storage::StorageKey};
 
 use rhai::plugin::NativeCallContext;
 use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, INT};
@@ -95,6 +105,17 @@ impl Metadata {
 
   pub fn get_module(&self, name: &str) -> Option<&ModuleMetadata> {
     self.modules.get(name)
+  }
+
+  pub fn get_storage(
+    &self,
+    module: &str,
+    storage: &str,
+  ) -> Result<&StorageMetadata, Box<EvalAltResult>> {
+    Ok(self
+      .get_module(module)
+      .and_then(|m| m.get_storage(storage))
+      .ok_or_else(|| format!("Can't find storage: {}.{}", module, storage))?)
   }
 
   fn find_error(&self, mod_idx: INT, err_idx: INT) -> Dynamic {
@@ -338,6 +359,12 @@ impl NamedType {
     self.ty_meta.encode_value(param, data)
   }
 
+  fn encode(&self, param: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
+    let mut data = EncodedArgs::new();
+    self.ty_meta.encode_value(param, &mut data)?;
+    Ok(data.into_inner())
+  }
+
   pub fn decode(&self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
     self.ty_meta.decode(data)
   }
@@ -357,17 +384,17 @@ impl NamedType {
 
 #[derive(Debug, Clone)]
 pub struct KeyHasher {
-  pub hashers: Vec<StorageHasher>,
-  pub types: Vec<NamedType>,
+  pub type_hashers: Vec<(NamedType, StorageHasher)>,
 }
 
 impl KeyHasher {
   pub fn encode_map_key(&self, key: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {
     let mut buf = EncodedArgs::new();
-    match self.types.len() {
+    match self.type_hashers.len() {
       0 => Err(format!("This storage isn't a map type."))?,
       1 => {
-        self.types[0].encode_value(key, &mut buf)?;
+        let (ty, _) = &self.type_hashers[0];
+        ty.encode_value(key, &mut buf)?;
       }
       _ => {
         Err(format!("This storage isn't a double map type."))?;
@@ -383,14 +410,74 @@ impl KeyHasher {
   ) -> Result<(Vec<u8>, Vec<u8>), Box<EvalAltResult>> {
     let mut buf1 = EncodedArgs::new();
     let mut buf2 = EncodedArgs::new();
-    match self.types.len() {
+    match self.type_hashers.len() {
       2 => {
-        self.types[0].encode_value(key1, &mut buf1)?;
-        self.types[1].encode_value(key2, &mut buf2)?;
+        let (ty, _) = &self.type_hashers[0];
+        ty.encode_value(key1, &mut buf1)?;
+        let (ty, _) = &self.type_hashers[1];
+        ty.encode_value(key2, &mut buf2)?;
       }
       _ => Err(format!("This storage isn't a double map type."))?,
     }
     Ok((buf1.into_inner(), buf2.into_inner()))
+  }
+
+  fn hash_key(&self, buf: &mut Vec<u8>, idx: usize, key: Dynamic) -> Result<(), Box<EvalAltResult>> {
+    let (ty, hasher) = &self.type_hashers[idx];
+    let key = ty.encode(key)?;
+    match hasher {
+      StorageHasher::Blake2_128 => {
+        buf.extend(Blake2_128::hash(&key));
+      }
+      StorageHasher::Blake2_256 => {
+        buf.extend(Blake2_256::hash(&key));
+      }
+      StorageHasher::Blake2_128Concat => {
+        buf.extend(Blake2_128Concat::hash(&key));
+      }
+      StorageHasher::Twox128 => {
+        buf.extend(Twox128::hash(&key));
+      }
+      StorageHasher::Twox256 => {
+        buf.extend(Twox256::hash(&key));
+      }
+      StorageHasher::Twox64Concat => {
+        buf.extend(Twox64Concat::hash(&key));
+      }
+      StorageHasher::Identity => {
+        buf.extend(&key);
+      },
+    }
+    Ok(())
+  }
+
+  pub fn get_map_key(&self, mut buf: Vec<u8>, key: Dynamic) -> Result<StorageKey, Box<EvalAltResult>> {
+    match self.type_hashers.len() {
+      0 => Err(format!("This storage isn't a map type."))?,
+      1 => {
+        self.hash_key(&mut buf, 0, key)?;
+      }
+      _ => {
+        Err(format!("This storage isn't a double map type."))?;
+      }
+    }
+    Ok(StorageKey(buf))
+  }
+
+  pub fn get_double_map_key(
+    &self,
+    mut buf: Vec<u8>,
+    key1: Dynamic,
+    key2: Dynamic,
+  ) -> Result<StorageKey, Box<EvalAltResult>> {
+    match self.type_hashers.len() {
+      2 => {
+        self.hash_key(&mut buf, 0, key1)?;
+        self.hash_key(&mut buf, 1, key2)?;
+      }
+      _ => Err(format!("This storage isn't a double map type."))?,
+    }
+    Ok(StorageKey(buf))
   }
 }
 
@@ -414,9 +501,9 @@ impl StorageMetadata {
       StorageEntryType::Map {
         hasher, key, value, ..
       } => {
+        let ty = NamedType::new(decode_meta(key)?, lookup)?;
         let hasher = KeyHasher {
-          hashers: vec![hasher.clone()],
-          types: vec![NamedType::new(decode_meta(key)?, lookup)?],
+          type_hashers: vec![(ty, hasher.clone())],
         };
         (Some(hasher), value.clone())
       }
@@ -427,12 +514,12 @@ impl StorageMetadata {
         key2,
         value,
       } => {
+        let ty1 = NamedType::new(decode_meta(key1)?, lookup)?;
+        let ty2 = NamedType::new(decode_meta(key2)?, lookup)?;
         let hasher = KeyHasher {
-          hashers: vec![hasher.clone(), key2_hasher.clone()],
-          types: vec![
-            NamedType::new(decode_meta(key1)?, lookup)?,
-            NamedType::new(decode_meta(key2)?, lookup)?,
-          ],
+          type_hashers: vec![
+            (ty1, hasher.clone()),
+            (ty2, key2_hasher.clone())],
         };
         (Some(hasher), value.clone())
       }
@@ -446,6 +533,46 @@ impl StorageMetadata {
     };
 
     Ok(storage)
+  }
+
+  fn get_prefix_key(&self) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(512);
+    bytes.extend(sp_core::twox_128(self.prefix.as_bytes()));
+    bytes.extend(sp_core::twox_128(self.name.as_bytes()));
+    bytes
+  }
+
+  pub fn get_value_key(&self) -> Result<StorageKey, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(_) => Err(format!("This storage type expected key(s).").into()),
+      None => {
+        Ok(StorageKey(self.get_prefix_key()))
+      },
+    }
+  }
+
+  pub fn get_map_key(&self, key: Dynamic) -> Result<StorageKey, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(hasher) => {
+        let prefix = self.get_prefix_key();
+        hasher.get_map_key(prefix, key)
+      },
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
+  }
+
+  pub fn get_double_map_key(
+    &self,
+    key1: Dynamic,
+    key2: Dynamic,
+  ) -> Result<StorageKey, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(hasher) => {
+        let prefix = self.get_prefix_key();
+        hasher.get_double_map_key(prefix, key1, key2)
+      },
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
   }
 
   pub fn encode_map_key(&self, key: Dynamic) -> Result<Vec<u8>, Box<EvalAltResult>> {

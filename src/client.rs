@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use hex::FromHex;
 
 use frame_metadata::RuntimeMetadataPrefixed;
-use sp_core::{sr25519::Pair, Decode, Encode};
+use sp_core::{sr25519::Pair, storage::StorageKey, Decode, Encode};
 use sp_runtime::{generic, traits};
 use sp_version::RuntimeVersion;
 
@@ -217,6 +217,19 @@ impl InnerClient {
     self.rpc.call_method("chain_getBlock", json!([hash]))
   }
 
+  pub fn get_storage_by_key(
+    &self,
+    key: StorageKey,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    Ok(
+      self
+        .api
+        .get_storage_by_key_hash(key, at_block)
+        .map_err(|e| e.to_string())?,
+    )
+  }
+
   pub fn get_storage_value(
     &self,
     prefix: &str,
@@ -367,6 +380,18 @@ impl Client {
 
   pub fn get_block(&self, hash: Option<Hash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
+  }
+
+  pub fn get_storage_by_key(
+    &self,
+    key: StorageKey,
+    at_block: Option<Hash>,
+  ) -> Result<Option<StorageValue>, Box<EvalAltResult>> {
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_storage_by_key(key, at_block)
   }
 
   pub fn get_storage_value(

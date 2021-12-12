@@ -1,5 +1,7 @@
 use rhai::{Dynamic, Engine, EvalAltResult};
 
+use sp_core::storage::StorageKey;
+
 use crate::client::Client;
 use crate::metadata::*;
 
@@ -17,21 +19,25 @@ impl Storage {
     }
   }
 
+  fn get_by_key(
+    &self,
+    md: &StorageMetadata,
+    key: StorageKey,
+  ) -> Result<Dynamic, Box<EvalAltResult>> {
+    match self.client.get_storage_by_key(key, None)? {
+      Some(value) => md.decode_value((*value).into()),
+      None => Ok(Dynamic::UNIT),
+    }
+  }
+
   pub fn get_value(
     &mut self,
     mod_name: &str,
     storage_name: &str,
   ) -> Result<Dynamic, Box<EvalAltResult>> {
-    let md = self
-      .metadata
-      .get_module(mod_name)
-      .and_then(|m| m.get_storage(storage_name))
-      .ok_or_else(|| format!("Can't find storage: {}.{}", mod_name, storage_name))?;
-
-    match self.client.get_storage_value(&md.prefix, &md.name, None)? {
-      Some(value) => md.decode_value((*value).into()),
-      None => Ok(Dynamic::UNIT),
-    }
+    let md = self.metadata.get_storage(mod_name, storage_name)?;
+    let key = md.get_value_key()?;
+    self.get_by_key(md, key)
   }
 
   pub fn get_map(
@@ -40,22 +46,9 @@ impl Storage {
     storage_name: &str,
     key: Dynamic,
   ) -> Result<Dynamic, Box<EvalAltResult>> {
-    let md = self
-      .metadata
-      .get_module(mod_name)
-      .and_then(|m| m.get_storage(storage_name))
-      .ok_or_else(|| format!("Can't find storage: {}.{}", mod_name, storage_name))?;
-
-    // Encode map key.
-    let key = md.encode_map_key(key)?;
-
-    match self
-      .client
-      .get_storage_map(&md.prefix, &md.name, key, None)?
-    {
-      Some(value) => md.decode_value((*value).into()),
-      None => Ok(Dynamic::UNIT),
-    }
+    let md = self.metadata.get_storage(mod_name, storage_name)?;
+    let key = md.get_map_key(key)?;
+    self.get_by_key(md, key)
   }
 
   pub fn get_double_map(
@@ -65,22 +58,9 @@ impl Storage {
     key1: Dynamic,
     key2: Dynamic,
   ) -> Result<Dynamic, Box<EvalAltResult>> {
-    let md = self
-      .metadata
-      .get_module(mod_name)
-      .and_then(|m| m.get_storage(storage_name))
-      .ok_or_else(|| format!("Can't find storage: {}.{}", mod_name, storage_name))?;
-
-    // Encode double map keys.
-    let (key1, key2) = md.encode_double_map_key(key1, key2)?;
-
-    match self
-      .client
-      .get_storage_double_map(&md.prefix, &md.name, key1, key2, None)?
-    {
-      Some(value) => md.decode_value((*value).into()),
-      None => Ok(Dynamic::UNIT),
-    }
+    let md = self.metadata.get_storage(mod_name, storage_name)?;
+    let key = md.get_double_map_key(key1, key2)?;
+    self.get_by_key(md, key)
   }
 }
 

@@ -3886,6 +3886,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "frame-metadata",
+ "frame-support",
  "hex",
  "indexmap",
  "ledger-apdu",
