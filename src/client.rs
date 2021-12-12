@@ -1,23 +1,33 @@
 use std::sync::{Arc, RwLock};
 
+use hex::FromHex;
+
 use frame_metadata::RuntimeMetadataPrefixed;
-use sp_core::sr25519::Pair;
+use sp_core::{sr25519::Pair, Decode, Encode};
 use sp_runtime::{generic, traits};
+use sp_version::RuntimeVersion;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use substrate_api_client::extrinsic::{compose_extrinsic_offline, xt_primitives::*};
-use substrate_api_client::rpc::{json_req::*, XtStatus};
+use substrate_api_client::rpc::XtStatus;
 use substrate_api_client::{Api, Hash, StorageValue};
 
 use rhai::serde::from_dynamic;
 use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap};
 
-use crate::metadata::EncodedCall;
+use crate::metadata::{EncodedCall, Metadata};
+use crate::rpc::*;
 use crate::types::{TypeLookup, TypeRef};
 use crate::users::User;
 
 pub type SignedBlock = generic::SignedBlock<Block>;
+
+#[derive(Clone, Deserialize, Debug)]
+pub struct AccountInfo {
+  pub nonce: u32,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Block {
@@ -117,38 +127,79 @@ impl EventRecords {
 }
 
 pub struct InnerClient {
+  rpc: RpcHandler,
+  runtime_version: RuntimeVersion,
+  genesis_hash: Hash,
+  metadata: Metadata,
   api: Api<Pair>,
   event_records: TypeRef,
+  account_info: TypeRef,
 }
 
 impl InnerClient {
-  pub fn new(api: Api<Pair>, lookup: &TypeLookup) -> Arc<RwLock<Self>> {
+  pub fn new(
+    rpc: RpcHandler,
+    api: Api<Pair>,
+    lookup: &TypeLookup,
+  ) -> Result<Arc<RwLock<Self>>, Box<EvalAltResult>> {
+    let runtime_version = Self::rpc_get_runtime_version(&rpc)?;
+    let genesis_hash = Self::rpc_get_genesis_hash(&rpc)?;
+    let runtime_metadata = Self::rpc_get_runtime_metadata(&rpc)?;
+    let metadata = Metadata::from_runtime_metadata(runtime_metadata, lookup)?;
+
     let event_records = lookup.resolve("EventRecords");
-    Arc::new(RwLock::new(Self { api, event_records }))
+    let account_info = lookup.resolve("AccountInfo");
+    Ok(Arc::new(RwLock::new(Self {
+      rpc,
+      runtime_version,
+      genesis_hash,
+      metadata,
+      api,
+      event_records,
+      account_info,
+    })))
   }
 
-  pub fn check_url(&self, url: &str) -> bool {
-    self.api.url == url
+  /// Get runtime version from rpc node.
+  fn rpc_get_runtime_version(rpc: &RpcHandler) -> Result<RuntimeVersion, Box<EvalAltResult>> {
+    Ok(
+      rpc
+        .call_method("state_getRuntimeVersion", Value::Null)?
+        .ok_or_else(|| format!("Failed to get RuntimeVersion from node."))?,
+    )
   }
 
-  pub fn url(&self) -> &str {
-    &self.api.url
+  /// Get genesis hash from rpc node.
+  fn rpc_get_genesis_hash(rpc: &RpcHandler) -> Result<Hash, Box<EvalAltResult>> {
+    Ok(
+      rpc
+        .call_method("chain_getBlockHash", json!([0u64]))?
+        .ok_or_else(|| format!("Failed to get genesis hash from node."))?,
+    )
   }
 
-  pub fn print_metadata(&self) {
-    self.api.metadata.print_overview();
+  /// Get metadata from rpc node.
+  fn rpc_get_runtime_metadata(
+    rpc: &RpcHandler,
+  ) -> Result<RuntimeMetadataPrefixed, Box<EvalAltResult>> {
+    let hex: String = rpc
+      .call_method("state_getMetadata", json!([]))?
+      .ok_or_else(|| format!("Failed to get Metadata from node."))?;
+
+    let bytes = Vec::from_hex(&hex[2..]).map_err(|e| e.to_string())?;
+    Ok(RuntimeMetadataPrefixed::decode(&mut bytes.as_slice()).map_err(|e| e.to_string())?)
   }
 
-  pub fn get_metadata(&self) -> Result<RuntimeMetadataPrefixed, Box<EvalAltResult>> {
-    Ok(self.api.get_metadata().map_err(|e| e.to_string())?)
+  pub fn get_metadata(&self) -> Metadata {
+    self.metadata.clone()
   }
 
   pub fn get_signed_extra(&self) -> AdditionalSigned {
     (
-      self.api.runtime_version.spec_version,
-      self.api.runtime_version.transaction_version,
-      self.api.genesis_hash,
-      self.api.genesis_hash,
+      self.runtime_version.spec_version,
+      self.runtime_version.transaction_version,
+      self.genesis_hash,
+      self.genesis_hash,
       (),
       (),
       (),
@@ -163,17 +214,7 @@ impl InnerClient {
     &self,
     hash: Option<Hash>,
   ) -> Result<Option<SignedBlock>, Box<EvalAltResult>> {
-    Ok(match self.get_request(chain_get_block(hash).to_string())? {
-      Some(data) => {
-        let signed = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-        Some(signed)
-      }
-      None => None,
-    })
-  }
-
-  pub fn get_request(&self, req: String) -> Result<Option<String>, Box<EvalAltResult>> {
-    Ok(self.api.get_request(req).map_err(|e| e.to_string())?)
+    self.rpc.call_method("chain_getBlock", json!([hash]))
   }
 
   pub fn get_storage_value(
@@ -231,13 +272,29 @@ impl InnerClient {
     }
   }
 
+  pub fn get_account_info(
+    &self,
+    account: AccountId,
+  ) -> Result<Option<Dynamic>, Box<EvalAltResult>> {
+    match self.get_storage_map("System", "Account", account.encode(), None)? {
+      Some(value) => {
+        let data = Vec::from(&*value);
+        // Decode chain's 'AccountInfo' value.
+        Ok(Some(self.account_info.decode(data)?))
+      }
+      None => Ok(None),
+    }
+  }
+
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
-    let nonce = self
-      .api
-      .get_account_info(&account)
-      .map(|info| info.map(|info| info.nonce))
-      .map_err(|e| e.to_string())?;
-    Ok(nonce)
+    match self.get_account_info(account)? {
+      Some(value) => {
+        // Get nonce.
+        let account_info: AccountInfo = from_dynamic(&value)?;
+        Ok(Some(account_info.nonce))
+      }
+      None => Ok(None),
+    }
   }
 
   pub fn submit(&self, xthex: String) -> Result<(Option<Hash>, String), Box<EvalAltResult>> {
@@ -259,10 +316,10 @@ impl InnerClient {
       call.into_call(),
       user.nonce,
       generic::Era::Immortal,
-      self.api.genesis_hash,
-      self.api.genesis_hash,
-      self.api.runtime_version.spec_version,
-      self.api.runtime_version.transaction_version,
+      self.genesis_hash,
+      self.genesis_hash,
+      self.runtime_version.spec_version,
+      self.runtime_version.transaction_version,
     )
     .hex_encode();
 
@@ -289,22 +346,18 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn connect(url: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
+  pub fn connect(
+    rpc: RpcHandler,
+    url: &str,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
     let api = Api::new(url.into()).map_err(|e| e.to_string())?;
     Ok(Self {
-      inner: InnerClient::new(api, lookup),
+      inner: InnerClient::new(rpc, api, lookup)?,
     })
   }
 
-  pub fn check_url(&self, url: &str) -> bool {
-    self.inner.read().unwrap().check_url(url)
-  }
-
-  pub fn print_metadata(&mut self) {
-    self.inner.read().unwrap().print_metadata()
-  }
-
-  pub fn get_metadata(&self) -> Result<RuntimeMetadataPrefixed, Box<EvalAltResult>> {
+  pub fn get_metadata(&self) -> Metadata {
     self.inner.read().unwrap().get_metadata()
   }
 
@@ -314,10 +367,6 @@ impl Client {
 
   pub fn get_block(&self, hash: Option<Hash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
-  }
-
-  pub fn get_request(&self, req: String) -> Result<Option<String>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_request(req)
   }
 
   pub fn get_storage_value(
@@ -519,6 +568,7 @@ impl ExtrinsicCallResult {
 }
 
 pub fn init_engine(
+  rpc: &RpcHandler,
   engine: &mut Engine,
   url: &str,
   lookup: &TypeLookup,
@@ -526,7 +576,6 @@ pub fn init_engine(
   engine
     .register_type_with_name::<Client>("Client")
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
-    .register_fn("print_metadata", Client::print_metadata)
     .register_type_with_name::<Block>("Block")
     .register_fn("to_string", Block::to_string)
     .register_type_with_name::<EventRecords>("EventRecords")
@@ -544,6 +593,6 @@ pub fn init_engine(
     .register_get("xthex", ExtrinsicCallResult::xthex)
     .register_fn("to_string", ExtrinsicCallResult::to_string);
 
-  let client = Client::connect(url, lookup)?;
+  let client = Client::connect(rpc.clone(), url, lookup)?;
   Ok(client)
 }

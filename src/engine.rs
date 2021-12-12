@@ -5,7 +5,7 @@ pub use rhai::{Dynamic, Engine, EvalAltResult, Position, Scope};
 #[cfg(not(feature = "no_optimize"))]
 use rhai::OptimizationLevel;
 
-use crate::{client, metadata, plugins, storage, types, rpc, users};
+use crate::{client, metadata, plugins, rpc, storage, types, users};
 
 #[derive(Debug, Clone)]
 pub struct EngineOptions {
@@ -54,9 +54,11 @@ pub fn init_engine(opts: &EngineOptions) -> Result<(Engine, Scope), Box<EvalAltR
   engine.set_max_expr_depths(64, 64);
 
   // Initialize types, client, users, metadata and plugins.
+  let rpc_manager = rpc::init_engine(&mut engine)?;
+  let rpc = rpc_manager.get_client(&opts.url)?;
+
   let lookup = types::init_engine(&mut engine, &opts)?;
-  let client = client::init_engine(&mut engine, &opts.url, &lookup)?;
-  let rpc = rpc::init_engine(&mut engine, &opts.url)?;
+  let client = client::init_engine(&rpc, &mut engine, &opts.url, &lookup)?;
   let users = users::init_engine(&mut engine, &client);
   let metadata = metadata::init_engine(&mut engine, &mut globals, &client, &lookup)?;
   let storage = storage::init_engine(&mut engine, &client, &metadata);
@@ -64,6 +66,7 @@ pub fn init_engine(opts: &EngineOptions) -> Result<(Engine, Scope), Box<EvalAltR
 
   // Setup globals for easy access.
   globals.insert("CLIENT".into(), Dynamic::from(client));
+  globals.insert("RPC_MANAGER".into(), Dynamic::from(rpc_manager));
   globals.insert("RPC".into(), Dynamic::from(rpc));
   globals.insert("USER".into(), Dynamic::from(users));
   globals.insert("Types".into(), Dynamic::from(lookup));

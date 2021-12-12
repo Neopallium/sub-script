@@ -25,9 +25,10 @@ ws = "0.9.1"
 crossbeam-channel = "0.5.1"
 
 # substrate
-sp-core = "3.0.0"
-sp-keyring = "3.0.0"
-sp-runtime = "3.0.0"
+sp-core = "3.0"
+sp-version = "3.0"
+sp-keyring = "3.0"
+sp-runtime = "3.0"
 frame-metadata = { version = "13.0.0", default-features = false }
 parity-scale-codec = "2.3.1"
 

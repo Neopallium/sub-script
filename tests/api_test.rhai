@@ -6,8 +6,6 @@ print("Test Client API");
 let user = USER.Alice;
 print(`User: ${user}`);
 
-//CLIENT.print_metadata();
-
 /*
 let pallet = METADATA.Balances;
 print(`pallet: ${pallet}`);

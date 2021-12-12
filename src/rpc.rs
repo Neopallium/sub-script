@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde::{de::DeserializeOwned, Deserialize};
+use serde_json::{from_value, json, Value};
 
 use dashmap::DashMap;
 
@@ -25,18 +25,51 @@ impl RequestToken {
 }
 
 #[derive(Debug, Clone)]
-pub enum ResponseUpdate {
-  Reply(RequestToken, Result<Option<Value>, RpcError>),
-  Update(RequestToken, Option<Value>),
-  Closed(RequestToken),
+pub enum ResponseEvent {
+  Reply(Option<Value>),
+  Update(Option<Value>),
+  Error(RpcError),
+  Closed,
 }
 
-impl ResponseUpdate {
-  fn get_token(&self) -> RequestToken {
-    match &self {
-      ResponseUpdate::Reply(token, _) => *token,
-      ResponseUpdate::Update(token, _) => *token,
-      ResponseUpdate::Closed(token) => *token,
+impl ResponseEvent {
+  fn to_string(&mut self) -> String {
+    format!("{:?}", self)
+  }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResponseMessage {
+  pub token: RequestToken,
+  pub event: ResponseEvent,
+}
+
+impl ResponseMessage {
+  fn reply(token: RequestToken, result: Option<Value>) -> Self {
+    Self {
+      token,
+      event: ResponseEvent::Reply(result),
+    }
+  }
+
+  fn update(token: RequestToken, result: Option<Value>) -> Self {
+    Self {
+      token,
+      event: ResponseEvent::Update(result),
+    }
+  }
+
+  fn closed(token: RequestToken) -> Self {
+    Self {
+      token,
+      event: ResponseEvent::Closed,
+    }
+  }
+
+  fn error(token: RequestToken, err: RpcError) -> Self {
+    Self {
+      token,
+      event: ResponseEvent::Error(err),
     }
   }
 
@@ -45,8 +78,8 @@ impl ResponseUpdate {
   }
 }
 
-type RespSender = crossbeam_channel::Sender<ResponseUpdate>;
-type RespReceiver = crossbeam_channel::Receiver<ResponseUpdate>;
+type RespSender = crossbeam_channel::Sender<ResponseMessage>;
+type RespReceiver = crossbeam_channel::Receiver<ResponseMessage>;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RpcError {
@@ -139,7 +172,7 @@ struct RequestData {
 }
 
 impl RequestData {
-  fn send(&self, resp: ResponseUpdate) -> bool {
+  fn send(&self, resp: ResponseMessage) -> bool {
     if let Some(resp_tx) = &self.resp_tx {
       resp_tx.send(resp).is_ok()
     } else {
@@ -195,8 +228,8 @@ impl InnerRpcConnection {
     let id = token.req_id();
     match self.requests.remove(&id) {
       Some((_, req)) => {
-        eprintln!("Close Request: {:?}", token);
-        req.send(ResponseUpdate::Closed(token));
+        log::debug!("Close Request: {:?}", token);
+        req.send(ResponseMessage::closed(token));
         // Make sure to cleanup any subscriptions.
         if let Some(topic) = req.topic {
           self.subscriptions.remove(&topic);
@@ -206,7 +239,7 @@ impl InnerRpcConnection {
         }
       }
       None => {
-        eprintln!("Unknown request id: {}", id);
+        log::warn!("Unknown request id: {}", id);
       }
     }
     Ok(())
@@ -214,14 +247,14 @@ impl InnerRpcConnection {
 
   fn send(&self, req: RpcRequest) -> Result<RequestToken, Box<EvalAltResult>> {
     let (msg, token) = self.add_request(req);
-    eprintln!("send_msg({:?})", msg);
+    log::debug!("send_msg({:?})", msg);
     let out = self.out.read().unwrap();
     match &*out {
       Some(out) => {
         out.send(msg).map_err(|e| e.to_string())?;
       }
       None => {
-        eprintln!("Not connected yet.");
+        log::error!("Not connected yet.");
       }
     }
     Ok(token)
@@ -233,7 +266,8 @@ impl InnerRpcConnection {
   }
 
   fn get_subscription_id(&self, topic: Option<&str>) -> Option<RequestId> {
-    topic.and_then(|topic| self.subscriptions.get(topic))
+    topic
+      .and_then(|topic| self.subscriptions.get(topic))
       .map(|id| *id)
   }
 
@@ -241,15 +275,15 @@ impl InnerRpcConnection {
     let token = RequestToken(self.id, id);
     match self.requests.remove(&id) {
       Some((_, req)) => {
-        eprintln!("Request error: {:?}", error);
-        req.send(ResponseUpdate::Reply(token, Err(error)));
+        log::error!("Request error: {:?}", error);
+        req.send(ResponseMessage::error(token, error));
         // Make sure to cleanup any subscriptions.
         if let Some(topic) = req.topic {
           self.subscriptions.remove(&topic);
         }
       }
       None => {
-        eprintln!("Unknown request id: {}", id);
+        log::warn!("Unknown request id: {}", id);
       }
     }
     Ok(())
@@ -259,26 +293,26 @@ impl InnerRpcConnection {
     let token = RequestToken(self.id, id);
     match self.requests.get_mut(&id) {
       Some(mut req) if req.is_subscription => {
-        eprintln!("Subscription update: {:?}", result);
+        log::debug!("Subscription started: {:?}", result);
         // Subscribe started.  (result == topic).
         if let Some(topic) = result.as_ref().and_then(|v| v.as_str()) {
-          eprintln!("Map subscription to request id: {} -> {}", topic, id);
+          log::debug!("Map subscription to request id: {} -> {}", topic, id);
           // Map subscription topic to request id.
           self.subscriptions.insert(topic.into(), id);
           req.topic = Some(topic.into());
         } else {
-          eprintln!("Unhandled result from subscribe request: {:?}", result);
+          log::warn!("Unhandled result from subscribe request: {:?}", result);
         }
       }
       Some(req) => {
-        eprintln!("Request reply: {:?}", result);
-        req.send(ResponseUpdate::Reply(token, Ok(result)));
+        log::debug!("Request reply: {:?}", result);
+        req.send(ResponseMessage::reply(token, result));
         // Drop reference `req` so we can remove it without deadlocking.
         drop(req);
         self.requests.remove(&id);
       }
       None => {
-        eprintln!("Unknown request id: {}", id);
+        log::warn!("Unknown request id: {}", id);
       }
     }
     Ok(())
@@ -288,8 +322,8 @@ impl InnerRpcConnection {
     match self.requests.get(&id) {
       Some(req) => {
         let token = RequestToken(self.id, id);
-        eprintln!("subscription update: {:?}", result);
-        let sent = req.send(ResponseUpdate::Update(token, result));
+        log::debug!("subscription update: {:?}", result);
+        let sent = req.send(ResponseMessage::update(token, result));
 
         if !sent {
           // Drop reference `req` so we can remove it without deadlocking.
@@ -299,7 +333,7 @@ impl InnerRpcConnection {
         }
       }
       None => {
-        eprintln!("Unknown request id: {}", id);
+        log::warn!("Unknown request id: {}", id);
       }
     }
     Ok(())
@@ -307,7 +341,7 @@ impl InnerRpcConnection {
 
   fn on_resp(&self, resp: RpcResp) -> Result<(), ws::Error> {
     if resp.jsonrpc != "2.0" {
-      eprintln!("Unknown jsonrpc version: {:?}", resp.jsonrpc);
+      log::error!("Unknown jsonrpc version: {:?}", resp.jsonrpc);
     }
     if let Some(id) = resp.id {
       if let Some(error) = resp.error {
@@ -322,23 +356,22 @@ impl InnerRpcConnection {
         if let Some(id) = self.get_subscription_id(topic) {
           return self.request_update(id, params.result);
         } else {
-          eprintln!("Unknown subscription: {:?}", params);
+          log::warn!("Unknown subscription: {:?}", params);
           return Ok(());
         }
       }
     }
-    eprintln!("Unhandled message: {:?}", resp);
+    log::error!("Unhandled message: {:?}", resp);
     Ok(())
   }
 
   fn on_message(&self, msg: Message) -> Result<(), ws::Error> {
-    eprintln!("on_msg({:?})", msg);
+    log::debug!("on_msg({:?})", msg);
     match &msg {
       Message::Text(msg) => {
-        let resp: RpcResp = serde_json::from_str(msg)
-          .map_err(|e| new_error(e.to_string()))?;
+        let resp: RpcResp = serde_json::from_str(msg).map_err(|e| new_error(e.to_string()))?;
         self.on_resp(resp)?;
-      },
+      }
       Message::Binary(_) => {
         Err(new_error(format!("Can't handle binary messages yet")))?;
       }
@@ -366,13 +399,12 @@ impl RpcConnection {
 
   fn spawn(&self) -> Result<(), ws::Error> {
     let mut ws = WebSocket::new(self.clone())?;
-    let url = url::Url::parse(&self.url)
-      .map_err(|e| new_error(e.to_string()))?;
+    let url = url::Url::parse(&self.url).map_err(|e| new_error(e.to_string()))?;
     self.set_out(ws.broadcaster());
     ws.connect(url)?;
-    thread::Builder::new().name("RpcConnection".into()).spawn(move || {
-      ws.run()
-    })?;
+    thread::Builder::new()
+      .name("RpcConnection".into())
+      .spawn(move || ws.run())?;
     Ok(())
   }
 }
@@ -396,7 +428,7 @@ pub struct InnerRpcHandler {
   conn: RpcConnection,
   resp_tx: RespSender,
   resp_rx: RespReceiver,
-  updates: DashMap<RequestToken, ResponseUpdate>,
+  updates: DashMap<RequestToken, ResponseEvent>,
 }
 
 impl InnerRpcHandler {
@@ -410,16 +442,20 @@ impl InnerRpcHandler {
     })
   }
 
+  fn send(&self, req: RpcRequest) -> Result<RequestToken, Box<EvalAltResult>> {
+    self.conn.send(req)
+  }
+
   pub fn close_request(&self, token: RequestToken) -> Result<(), Box<EvalAltResult>> {
     self.conn.close_request(token)
   }
 
-  pub fn get_response(&self, token: RequestToken) -> Result<ResponseUpdate, Box<EvalAltResult>> {
+  pub fn get_response(&self, token: RequestToken) -> Result<ResponseEvent, Box<EvalAltResult>> {
     if let Some((_, resp)) = self.updates.remove(&token) {
-      eprintln!("------ response was already received: {:?}", token);
+      log::debug!("------ response was already received: {:?}", token);
       return Ok(resp);
     }
-    eprintln!("------ get updates.");
+    log::debug!("------ get updates.");
     match self.get_updates(Some(token))? {
       Some(resp) => Ok(resp),
       None => Err(format!("Failed to get response for request: {:?}", token))?,
@@ -430,39 +466,38 @@ impl InnerRpcHandler {
     self.resp_tx.clone()
   }
 
-  pub fn get_update(&self) -> Result<ResponseUpdate, Box<EvalAltResult>> {
-    Ok(self.resp_rx.recv()
-      .map_err(|_| format!("RpcConnection closed"))?)
-  }
-
-  fn get_one_update(&self, wait: bool) -> Result<Option<ResponseUpdate>, Box<EvalAltResult>> {
+  fn get_one_update(&self, wait: bool) -> Result<Option<ResponseMessage>, Box<EvalAltResult>> {
     if wait {
-      Ok(Some(self.resp_rx.recv()
-        .map_err(|_| format!("RpcConnection closed"))?))
+      Ok(Some(
+        self
+          .resp_rx
+          .recv()
+          .map_err(|_| format!("RpcConnection closed"))?,
+      ))
     } else {
       use crossbeam_channel::TryRecvError::*;
       match self.resp_rx.try_recv() {
         Ok(resp) => Ok(Some(resp)),
         Err(Empty) => Ok(None),
-        Err(Disconnected) => {
-          Err(format!("RpcConnection closed"))?
-        },
+        Err(Disconnected) => Err(format!("RpcConnection closed"))?,
       }
     }
   }
 
-  fn get_updates(&self, wait_for: Option<RequestToken>) -> Result<Option<ResponseUpdate>, Box<EvalAltResult>> {
+  fn get_updates(
+    &self,
+    wait_for: Option<RequestToken>,
+  ) -> Result<Option<ResponseEvent>, Box<EvalAltResult>> {
     let wait = wait_for.is_some();
     loop {
       match self.get_one_update(wait)? {
         Some(resp) => {
-          let token = resp.get_token();
-          if wait_for == Some(token) {
-            eprintln!("------ got response we wanted: {:?}", token);
-            return Ok(Some(resp));
+          if wait_for == Some(resp.token) {
+            log::debug!("------ got response we wanted: {:?}", resp.token);
+            return Ok(Some(resp.event));
           }
-          eprintln!("------ cache response: {:?}", token);
-          self.updates.insert(token, resp);
+          log::debug!("------ cache response: {:?}", resp.token);
+          self.updates.insert(resp.token, resp.event);
         }
         None => {
           break;
@@ -488,14 +523,44 @@ impl RpcHandler {
     Self(InnerRpcHandler::new(conn))
   }
 
-  pub fn call_method(&self, method: &str, params: Value) -> Result<RequestToken, Box<EvalAltResult>> {
+  pub fn async_call_method(
+    &self,
+    method: &str,
+    params: Value,
+  ) -> Result<RequestToken, Box<EvalAltResult>> {
     let req = RpcRequest::call_method(method, params, self.get_sender());
-    self.0.conn.send(req)
+    self.0.send(req)
   }
 
-  pub fn subscribe(&self, method: &str, params: Value, unsub: &str) -> Result<RequestToken, Box<EvalAltResult>> {
+  /// Make a rpc call and wait for the response.
+  pub fn call_method<T: DeserializeOwned>(
+    &self,
+    method: &str,
+    params: Value,
+  ) -> Result<Option<T>, Box<EvalAltResult>> {
+    let token = self.async_call_method(method, params)?;
+    match self.get_response(token)? {
+      ResponseEvent::Reply(Some(reply)) => {
+        let res: T = from_value(reply).map_err(|e| e.to_string())?;
+        Ok(Some(res))
+      }
+      ResponseEvent::Reply(None) => Ok(None),
+      ResponseEvent::Update(_) => Err(format!(
+        "Got invalid subscription update event for an method call."
+      ))?,
+      ResponseEvent::Error(err) => Err(format!("{:?}", err))?,
+      ResponseEvent::Closed => Err(format!("Request closed without response."))?,
+    }
+  }
+
+  pub fn subscribe(
+    &self,
+    method: &str,
+    params: Value,
+    unsub: &str,
+  ) -> Result<RequestToken, Box<EvalAltResult>> {
     let req = RpcRequest::subscribe(method, params, self.get_sender(), unsub);
-    self.0.conn.send(req)
+    self.0.send(req)
   }
 }
 
@@ -541,32 +606,49 @@ fn new_error(msg: String) -> ws::Error {
   ws::Error::new(ws::ErrorKind::Internal, msg)
 }
 
-pub fn init_engine(
-  engine: &mut Engine,
-  _url: &str,
-) -> Result<RpcManager, Box<EvalAltResult>> {
+pub fn init_engine(engine: &mut Engine) -> Result<RpcManager, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<RpcConnection>("RpcConnection")
     .register_type_with_name::<RequestToken>("RequestToken")
-    .register_type_with_name::<ResponseUpdate>("ResponseUpdate")
-    .register_fn("to_string", ResponseUpdate::to_string)
+    .register_type_with_name::<ResponseEvent>("ResponseEvent")
+    .register_fn("to_string", ResponseEvent::to_string)
+    .register_type_with_name::<ResponseMessage>("ResponseMessage")
+    .register_fn("to_string", ResponseMessage::to_string)
     .register_type_with_name::<RpcHandler>("RpcHandler")
-    .register_result_fn("call_method", |client: &mut RpcHandler, method: &str, params: Dynamic| {
-      let params: Value = from_dynamic(&params)?;
-      client.call_method(method, params)
-    })
-    .register_result_fn("subscribe", |client: &mut RpcHandler, method: &str, params: Dynamic, unsub: &str| {
-      let params: Value = from_dynamic(&params)?;
-      client.subscribe(method, params, unsub)
-    })
-    .register_result_fn("get_response", |client: &mut RpcHandler, token: RequestToken| {
-      client.get_response(token)
-    })
-    .register_result_fn("close_request", |client: &mut RpcHandler, token: RequestToken| {
-      client.close_request(token)
-    })
+    .register_result_fn(
+      "async_method",
+      |client: &mut RpcHandler, method: &str, params: Dynamic| {
+        let params: Value = from_dynamic(&params)?;
+        client.async_call_method(method, params)
+      },
+    )
+    .register_result_fn(
+      "call_method",
+      |client: &mut RpcHandler, method: &str, params: Dynamic| {
+        let params: Value = from_dynamic(&params)?;
+        let res: Option<Dynamic> = client.call_method(method, params)?;
+        Ok(res.unwrap_or(Dynamic::UNIT))
+      },
+    )
+    .register_result_fn(
+      "subscribe",
+      |client: &mut RpcHandler, method: &str, params: Dynamic, unsub: &str| {
+        let params: Value = from_dynamic(&params)?;
+        client.subscribe(method, params, unsub)
+      },
+    )
+    .register_result_fn(
+      "get_response",
+      |client: &mut RpcHandler, token: RequestToken| client.get_response(token),
+    )
+    .register_result_fn(
+      "close_request",
+      |client: &mut RpcHandler, token: RequestToken| client.close_request(token),
+    )
     .register_type_with_name::<RpcManager>("RpcManager")
-    .register_result_fn("get_client", |rpc: &mut RpcManager, url: &str| rpc.get_client(url));
+    .register_result_fn("get_client", |rpc: &mut RpcManager, url: &str| {
+      rpc.get_client(url)
+    });
 
   let rpc = RpcManager::new();
   Ok(rpc)

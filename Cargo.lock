@@ -3901,6 +3901,7 @@ dependencies = [
  "sp-core",
  "sp-keyring",
  "sp-runtime",
+ "sp-version",
  "structopt",
  "substrate-api-client",
  "url 2.2.2",

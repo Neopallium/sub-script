@@ -30,14 +30,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
-  pub fn new(client: &Client, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
-    // Get runtime metadata.
-    let metadata_prefixed = client.get_metadata()?;
-
-    Self::from_meta(metadata_prefixed, lookup)
-  }
-
-  pub fn from_meta(
+  pub fn from_runtime_metadata(
     metadata_prefixed: RuntimeMetadataPrefixed,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
@@ -995,7 +988,7 @@ pub fn init_engine(
     .register_fn("to_string", Docs::to_string)
     .register_get("title", Docs::title);
 
-  let metadata = Metadata::new(client, lookup)?;
+  let metadata = client.get_metadata();
 
   lookup.custom_encode("Call", TypeId::of::<EncodedCall>(), |value, data| {
     let call = value.cast::<EncodedCall>();
