@@ -1,3 +1,12 @@
+// Wait for all call results and print errors.
+fn wait_for_results(results) {
+	for res in results {
+		if !res.is_success {
+			print(`call failed: ${res.result()}`);
+		}
+	}
+}
+
 // get multiple user's account ids.
 fn get_accounts(users) {
 	return users.map(|u| u.acc);
@@ -102,7 +111,7 @@ fn create_users(names, balance) {
 	let dids = get_dids(users);
 	let cur_bals = get_balances(users);
 
-	let last_res;
+	let results = [];
 	let calls = [];
 	//for name in names {
 	//	let user = USER[name];
@@ -118,19 +127,17 @@ fn create_users(names, balance) {
 			calls += Sudo.sudo(Balances.set_balance(user, balance, 0));
 		}
 		if calls.len() > 200 {
-			last_res = alice.submit(Utility.batch_optimistic(calls));
+			results += alice.submit(Utility.batch_optimistic(calls));
 			calls = [];
 		}
 	}
 
 	// Final batch if there are still calls to make.
 	if calls.len() > 0 {
-		last_res = alice.submit(Utility.batch_optimistic(calls));
+		results += alice.submit(Utility.batch_optimistic(calls));
 	}
-	if last_res != () {
-		print("Wait for final batch results");
-		print(`res: ${last_res}`);
-	}
+	print("CreateUsers: Wait for batch results");
+	wait_for_results(results);
 	return users;
 }
 
@@ -149,26 +156,19 @@ fn create_assets(tickers, supply) {
 	let ticker_to_issuer = |ticker| `Issuer_${ticker}`;
 	let issuers = create_users(tickers.map(ticker_to_issuer), 10000);
 
-	let calls = [];
+	let results = [];
 	for (ticker, idx) in tickers {
 		let issuer = issuers[idx];
 	
-		calls += make_relay_tx(issuer, Utility.batch_optimistic([
-			Asset.create_asset(`Token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), false),
+		results += issuer.submit(Utility.batch_optimistic([
+			Asset.create_asset(`token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), false),
 			Asset.issue(ticker, supply),
 		]));
-		if calls.len() > 100 {
-			let res = alice.submit(Utility.batch_optimistic(calls));
-			print(`res: ${res}`);
-			calls = [];
-		}
 	}
+	// Wait for all results.
+	print("CreateAssets: Wait for batch results");
+	wait_for_results(results);
 	
-	// Final batch if there are still calls to make.
-	if calls.len() > 0 {
-		let res = alice.submit(Utility.batch_optimistic(calls));
-		print(`res: ${res}`);
-	}
 	return issuers;
 }
 
