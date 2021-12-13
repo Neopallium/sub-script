@@ -25,10 +25,13 @@ use crate::rpc::*;
 use crate::types::{TypeLookup, TypeRef};
 use crate::users::{AccountId, User};
 
+pub type TxHash = H256;
+pub type BlockHash = H256;
+
 pub type SignedBlock = generic::SignedBlock<Block>;
 pub type GenericAddress = sp_runtime::MultiAddress<AccountId, ()>;
 
-pub type AdditionalSigned = (u32, u32, H256, H256, (), (), ());
+pub type AdditionalSigned = (u32, u32, BlockHash, BlockHash, (), (), ());
 
 #[derive(Clone, Debug, Encode, Decode)]
 pub struct Extra(Era, Compact<u32>, Compact<u128>);
@@ -104,6 +107,21 @@ pub struct AccountInfo {
   pub nonce: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TransactionStatus {
+  Future,
+  Ready,
+  Broadcast(Vec<String>),
+  InBlock(BlockHash),
+  Retracted(BlockHash),
+  FinalityTimeout(BlockHash),
+  Finalized(BlockHash),
+  Usurped(TxHash),
+  Dropped,
+  Invalid,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
   extrinsics: Vec<String>,
@@ -132,7 +150,7 @@ pub struct EventRecord {
   pub phase: Phase,
   pub name: String,
   pub args: Dynamic,
-  pub topics: Vec<H256>,
+  pub topics: Vec<BlockHash>,
 }
 
 impl EventRecord {
@@ -204,7 +222,7 @@ impl EventRecords {
 pub struct InnerClient {
   rpc: RpcHandler,
   runtime_version: RuntimeVersion,
-  genesis_hash: H256,
+  genesis_hash: BlockHash,
   metadata: Metadata,
   event_records: TypeRef,
   account_info: TypeRef,
@@ -242,7 +260,7 @@ impl InnerClient {
   }
 
   /// Get genesis hash from rpc node.
-  fn rpc_get_genesis_hash(rpc: &RpcHandler) -> Result<H256, Box<EvalAltResult>> {
+  fn rpc_get_genesis_hash(rpc: &RpcHandler) -> Result<BlockHash, Box<EvalAltResult>> {
     Ok(
       rpc
         .call_method("chain_getBlockHash", json!([0u64]))?
@@ -278,13 +296,13 @@ impl InnerClient {
     )
   }
 
-  pub fn get_block(&self, hash: Option<H256>) -> Result<Option<Block>, Box<EvalAltResult>> {
+  pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     Ok(self.get_signed_block(hash)?.map(|signed| signed.block))
   }
 
   pub fn get_signed_block(
     &self,
-    hash: Option<H256>,
+    hash: Option<BlockHash>,
   ) -> Result<Option<SignedBlock>, Box<EvalAltResult>> {
     self.rpc.call_method("chain_getBlock", json!([hash]))
   }
@@ -292,7 +310,7 @@ impl InnerClient {
   pub fn get_storage_by_key(
     &self,
     key: StorageKey,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .rpc
@@ -303,7 +321,7 @@ impl InnerClient {
     &self,
     module: &str,
     storage: &str,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     let md = self.metadata.get_storage(module, storage)?;
     let key = md.get_value_key()?;
@@ -315,7 +333,7 @@ impl InnerClient {
     module: &str,
     storage: &str,
     key: Vec<u8>,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     let md = self.metadata.get_storage(module, storage)?;
     let key = md.raw_map_key(key)?;
@@ -328,14 +346,14 @@ impl InnerClient {
     storage: &str,
     key1: Vec<u8>,
     key2: Vec<u8>,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     let md = self.metadata.get_storage(module, storage)?;
     let key = md.raw_double_map_key(key1, key2)?;
     self.get_storage_by_key(key, at_block)
   }
 
-  pub fn get_events(&self, block: Option<H256>) -> Result<Dynamic, Box<EvalAltResult>> {
+  pub fn get_events(&self, block: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
     match self.get_storage_value("System", "Events", block)? {
       Some(value) => Ok(self.event_records.decode(value.0)?),
       None => Ok(Dynamic::UNIT),
@@ -366,45 +384,74 @@ impl InnerClient {
     }
   }
 
-  pub fn submit(&self, xthex: String) -> Result<(Option<H256>, String), Box<EvalAltResult>> {
-    let token = self.rpc.subscribe(
-      "author_submitAndWatchExtrinsic",
-      json!([xthex]),
-      "author_unwatchExtrinsic",
-    )?;
-
-    // TODO: Don't wait for 'inBlock' event.
+  pub fn get_request_block_hash(&self, token: RequestToken) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
     let hash = loop {
       match self.rpc.get_response(token)? {
         ResponseEvent::Update(resp) => {
           log::debug!("extrinsic update: {:?}", resp);
           match resp {
             Some(value) => {
-              let block = &value["inBlock"];
-              if block != &Value::Null {
-                let hash: H256 = from_value(block.clone()).map_err(|e| e.to_string())?;
-                break hash;
-              } else {
-                log::debug!(" -- {:?}", value);
+              let status: TransactionStatus = from_value(value).map_err(|e| e.to_string())?;
+              match status {
+                TransactionStatus::InBlock(hash)
+                  | TransactionStatus::Finalized(hash)
+                  | TransactionStatus::FinalityTimeout(hash) => {
+                  break Some(hash);
+                },
+                TransactionStatus::Future => {
+                  log::warn!("Transaction in future (maybe nonce issue)");
+                },
+                TransactionStatus::Ready => {
+                  log::debug!("Transaction ready.");
+                },
+                TransactionStatus::Broadcast(nodes) => {
+                  log::debug!("Transaction broadcast: {:?}", nodes);
+                },
+                TransactionStatus::Retracted(hash) => {
+                  log::error!("Transaction retracted: {:?}", hash);
+                },
+                TransactionStatus::Usurped(tx_hash) => {
+                  log::error!("Transaction was replaced by another in the pool: {:?}", tx_hash);
+                },
+                TransactionStatus::Dropped => {
+                  log::error!("Transaction dropped.");
+                },
+                TransactionStatus::Invalid => {
+                  log::error!("Transaction invalid.");
+                },
               }
             }
-            None => Err(format!("Got empty reply."))?,
+            None => {
+              break None;
+            }
           }
         }
         ResponseEvent::Error(err) => Err(format!("{:?}", err))?,
-        resp => Err(format!("Unexpected response event: {:?}.", resp))?,
+        resp => {
+          self.rpc.close_request(token)?;
+          Err(format!("Unexpected response event: {:?}.", resp))?
+        },
       }
     };
     self.rpc.close_request(token)?;
 
-    Ok((Some(hash), xthex))
+    Ok(hash)
+  }
+
+  pub fn submit(&self, xthex: String) -> Result<(RequestToken, String), Box<EvalAltResult>> {
+    let token = self.rpc.subscribe(
+      "author_submitAndWatchExtrinsic",
+      json!([xthex]),
+      "author_unwatchExtrinsic",
+    )?;
+    Ok((token, xthex))
   }
 
   pub fn submit_call(
     &self,
     user: &User,
     call: EncodedCall,
-  ) -> Result<(Option<H256>, String), Box<EvalAltResult>> {
+  ) -> Result<(RequestToken, String), Box<EvalAltResult>> {
     let extra = Extra::new(generic::Era::Immortal, user.nonce);
     let payload = SignedPayload::new(&call, &extra, self.get_signed_extra());
 
@@ -419,7 +466,7 @@ impl InnerClient {
   pub fn submit_unsigned(
     &self,
     call: EncodedCall,
-  ) -> Result<(Option<H256>, String), Box<EvalAltResult>> {
+  ) -> Result<(RequestToken, String), Box<EvalAltResult>> {
     let xthex = ExtrinsicV4::unsigned(call).to_hex();
 
     self.submit(xthex)
@@ -446,14 +493,14 @@ impl Client {
     self.inner.read().unwrap().get_signed_extra()
   }
 
-  pub fn get_block(&self, hash: Option<H256>) -> Result<Option<Block>, Box<EvalAltResult>> {
+  pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
   }
 
   pub fn get_storage_by_key(
     &self,
     key: StorageKey,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_storage_by_key(key, at_block)
   }
@@ -462,7 +509,7 @@ impl Client {
     &self,
     prefix: &str,
     key_name: &str,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
@@ -476,7 +523,7 @@ impl Client {
     prefix: &str,
     key_name: &str,
     map_key: Vec<u8>,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
@@ -491,7 +538,7 @@ impl Client {
     storage_name: &str,
     key1: Vec<u8>,
     key2: Vec<u8>,
-    at_block: Option<H256>,
+    at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
@@ -500,12 +547,20 @@ impl Client {
       .get_storage_double_map(prefix, storage_name, key1, key2, at_block)
   }
 
-  pub fn get_events(&self, block: Option<H256>) -> Result<Dynamic, Box<EvalAltResult>> {
+  pub fn get_events(&self, block: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_events(block)
   }
 
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_nonce(account)
+  }
+
+  pub fn get_request_block_hash(&self, token: RequestToken) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_request_block_hash(token)
   }
 
   pub fn submit(&self, xthex: String) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
@@ -514,7 +569,7 @@ impl Client {
       .read()
       .unwrap()
       .submit(xthex)
-      .map(|(block, xthex)| ExtrinsicCallResult::new(self, block, xthex))
+      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
 
   pub fn submit_call(
@@ -527,7 +582,7 @@ impl Client {
       .read()
       .unwrap()
       .submit_call(user, call)
-      .map(|(block, xthex)| ExtrinsicCallResult::new(self, block, xthex))
+      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
 
   pub fn submit_unsigned(
@@ -539,7 +594,7 @@ impl Client {
       .read()
       .unwrap()
       .submit_unsigned(call)
-      .map(|(block, xthex)| ExtrinsicCallResult::new(self, block, xthex))
+      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
 
   pub fn inner(&self) -> Arc<RwLock<InnerClient>> {
@@ -550,27 +605,43 @@ impl Client {
 #[derive(Clone)]
 pub struct ExtrinsicCallResult {
   client: Client,
-  hash: Option<H256>,
+  loaded: bool,
+  token: RequestToken,
+  hash: Option<BlockHash>,
   xthex: String,
   idx: Option<u32>,
   events: Option<EventRecords>,
 }
 
 impl ExtrinsicCallResult {
-  pub fn new(client: &Client, hash: Option<H256>, xthex: String) -> Self {
+  pub fn new(client: &Client, token: RequestToken, xthex: String) -> Self {
     Self {
       client: client.clone(),
-      hash,
+      loaded: false,
+      token,
+      hash: None,
       xthex,
       idx: None,
       events: None,
     }
   }
 
+  fn get_block_hash(&mut self) -> Result<(), Box<EvalAltResult>> {
+    if self.loaded {
+      return Ok(());
+    }
+
+    self.loaded = true;
+    self.hash = self.client.get_request_block_hash(self.token)?;
+
+    Ok(())
+  }
+
   fn load_events(&mut self) -> Result<(), Box<EvalAltResult>> {
     if self.events.is_some() {
       return Ok(());
     }
+    self.get_block_hash()?;
     let events = match self.hash {
       Some(hash) => {
         // Load block and find the index of our extrinsic.
@@ -631,6 +702,7 @@ impl ExtrinsicCallResult {
   }
 
   pub fn block(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.get_block_hash()?;
     match self.hash {
       Some(hash) => match self.client.get_block(Some(hash))? {
         Some(block) => Ok(Dynamic::from(block)),

@@ -8,12 +8,13 @@ let user = USER.Test123;
 let key = USER.Key1;
 
 // Mock Cdd for user and make sure they have POLYX.
-let res = alice.submit(TestUtils.mock_cdd_register_did(user));
-if res.is_success {
-	alice.submit(Balances.transfer(user, 5.0));
-}
+print("Mock cdd");
+alice.submit(TestUtils.mock_cdd_register_did(user));
+print("Set balance");
+alice.submit(Sudo.sudo(Balances.set_balance(user, 5000.0, 0.0)));
 
 // Add JoinIdentity authorization for `key` to join `user`.
+print("Add JoinIdentity authorization.");
 let res = user.submit(Identity.add_authorization(#{
 	Account: key
 }, #{
