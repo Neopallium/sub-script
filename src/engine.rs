@@ -68,9 +68,12 @@ pub fn init_engine(opts: &EngineOptions) -> Result<(Engine, Scope), Box<EvalAltR
   globals.insert("CLIENT".into(), Dynamic::from(client));
   globals.insert("RPC_MANAGER".into(), Dynamic::from(rpc_manager));
   globals.insert("RPC".into(), Dynamic::from(rpc));
-  globals.insert("USER".into(), Dynamic::from(users));
   globals.insert("Types".into(), Dynamic::from(lookup));
   globals.insert("STORAGE".into(), Dynamic::from(storage));
+
+  // Make sure there is only one shared copy of `Users`.
+  let users = Dynamic::from(users).into_shared();
+  globals.insert("USER".into(), users);
   // Convert script arguments.
   let args = opts
     .args

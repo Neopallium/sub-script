@@ -15,7 +15,7 @@ pub type AccountId = AccountId32;
 pub struct User {
   pub pair: sr25519::Pair,
   pub nonce: u32,
-  name: String,
+  pub name: String,
   account: AccountId,
   client: Client,
 }
