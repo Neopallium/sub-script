@@ -6,6 +6,7 @@ use frame_metadata::RuntimeMetadataPrefixed;
 use parity_scale_codec::{Compact, Decode, Encode};
 use sp_core::{
   storage::{StorageData, StorageKey},
+  hashing::blake2_256,
   Pair, H256,
 };
 use sp_runtime::{
@@ -42,12 +43,23 @@ impl Extra {
   }
 }
 
-#[derive(Encode)]
-pub struct SignedPayload<'a>(&'a EncodedCall, &'a Extra, AdditionalSigned);
+pub struct SignedPayload<'a>((&'a EncodedCall, &'a Extra, AdditionalSigned));
 
 impl<'a> SignedPayload<'a> {
   pub fn new(call: &'a EncodedCall, extra: &'a Extra, additional: AdditionalSigned) -> Self {
-    Self(call, extra, additional)
+    Self((call, extra, additional))
+  }
+}
+
+impl<'a> Encode for SignedPayload<'a> {
+  fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
+    self.0.using_encoded(|payload| {
+      if payload.len() > 256 {
+        f(&blake2_256(payload)[..])
+      } else {
+        f(payload)
+      }
+    })
   }
 }
 
@@ -452,10 +464,10 @@ impl InnerClient {
     user: &User,
     call: EncodedCall,
   ) -> Result<(RequestToken, String), Box<EvalAltResult>> {
-    let extra = Extra::new(generic::Era::Immortal, user.nonce);
+    let extra = Extra::new(Era::Immortal, user.nonce);
     let payload = SignedPayload::new(&call, &extra, self.get_signed_extra());
 
-    let sig = user.pair.sign(&payload.encode());
+    let sig = payload.using_encoded(|p| user.pair.sign(p));
 
     let xt = ExtrinsicV4::signed(user.acc(), sig.into(), extra, call);
     let xthex = xt.to_hex();
@@ -717,6 +729,7 @@ impl ExtrinsicCallResult {
   }
 
   pub fn to_string(&mut self) -> String {
+    let _ = self.get_block_hash();
     match &self.hash {
       Some(hash) => {
         format!("InBlock: {:?}", hash)
