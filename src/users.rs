@@ -26,12 +26,11 @@ impl User {
     let seed = format!("//{}", name);
     let pair = sr25519::Pair::from_string(&seed, None).map_err(|e| format!("{:?}", e))?;
     let account = AccountId::new(pair.public().into());
-    let nonce = client.get_nonce(account.clone())?.unwrap_or(0);
     Ok(Self {
       name: name.into(),
       pair,
       account,
-      nonce,
+      nonce: 0u32,
       client,
     })
   }
@@ -56,6 +55,10 @@ impl User {
     &mut self,
     call: EncodedCall,
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+    // Check if we need to load the `nonce` for this user.
+    if self.nonce == 0u32 {
+      self.nonce = self.client.get_nonce(self.acc())?.unwrap_or(0);
+    }
     let res = self.client.submit_call(self, call)?;
 
     // Only update the nonce if the extrinsic executed.
