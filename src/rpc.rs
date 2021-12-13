@@ -532,14 +532,12 @@ impl RpcHandler {
     self.0.send(req)
   }
 
-  /// Make a rpc call and wait for the response.
-  pub fn call_method<T: DeserializeOwned>(
+  /// Get response to method call.
+  pub fn get_response<T: DeserializeOwned>(
     &self,
-    method: &str,
-    params: Value,
+    token: RequestToken,
   ) -> Result<Option<T>, Box<EvalAltResult>> {
-    let token = self.async_call_method(method, params)?;
-    match self.get_response(token)? {
+    match self.0.get_response(token)? {
       ResponseEvent::Reply(Some(reply)) => {
         let res: T = from_value(reply).map_err(|e| e.to_string())?;
         Ok(Some(res))
@@ -551,6 +549,43 @@ impl RpcHandler {
       ResponseEvent::Error(err) => Err(format!("{:?}", err))?,
       ResponseEvent::Closed => Err(format!("Request closed without response."))?,
     }
+  }
+
+  /// Get update for active subscription.
+  pub fn get_update<T: DeserializeOwned>(
+    &self,
+    token: RequestToken,
+  ) -> Result<Option<T>, Box<EvalAltResult>> {
+    match self.0.get_response(token)? {
+      ResponseEvent::Update(Some(reply)) => {
+        let res: T = from_value(reply).map_err(|e| e.to_string())?;
+        Ok(Some(res))
+      }
+      ResponseEvent::Update(None) => Ok(None),
+      ResponseEvent::Error(err) => Err(format!("{:?}", err))?,
+      resp => {
+        self.close_request(token)?;
+        Err(format!("Unexpected response event: {:?}", resp))?
+      }
+    }
+  }
+
+  /// Make a rpc call and wait for the response.
+  pub fn call_method<T: DeserializeOwned>(
+    &self,
+    method: &str,
+    params: Value,
+  ) -> Result<Option<T>, Box<EvalAltResult>> {
+    let token = self.async_call_method(method, params)?;
+    self.get_response(token)
+  }
+
+  /// Get response to multiple requests.
+  pub fn get_responses<T: DeserializeOwned>(
+    &self,
+    tokens: &[RequestToken],
+  ) -> Result<Vec<Option<T>>, Box<EvalAltResult>> {
+    tokens.into_iter().map(|t| self.get_response(*t)).collect()
   }
 
   pub fn subscribe(
@@ -639,7 +674,11 @@ pub fn init_engine(engine: &mut Engine) -> Result<RpcManager, Box<EvalAltResult>
     )
     .register_result_fn(
       "get_response",
-      |client: &mut RpcHandler, token: RequestToken| client.get_response(token),
+      |client: &mut RpcHandler, token: RequestToken| client.get_response::<Dynamic>(token),
+    )
+    .register_result_fn(
+      "get_update",
+      |client: &mut RpcHandler, token: RequestToken| client.get_update::<Dynamic>(token),
     )
     .register_result_fn(
       "close_request",

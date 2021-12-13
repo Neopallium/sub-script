@@ -1,6 +1,17 @@
+// get multiple user's account ids.
+fn get_accounts(users) {
+	return users.map(|u| u.acc);
+}
+
 // get user's account info.
 fn get_account_info(user) {
 	return STORAGE.map("System", "Account", user.acc);
+}
+
+// get multiple user's account infos.
+fn mult_get_account_info(users) {
+	let accounts = get_accounts(users);
+	return STORAGE.map_keys("System", "Account", accounts);
 }
 
 // get user's balance
@@ -13,9 +24,27 @@ fn get_balance(user) {
 	}
 }
 
+// get multiple user's balance
+fn get_balances(users) {
+	let infos = mult_get_account_info(users);
+	return infos.map(|info| {
+		if info == () {
+			return 0;
+		} else {
+			return info.data.free;
+		}
+	});
+}
+
 // get user's identity id.
 fn get_did(user) {
 	return STORAGE.map("Identity", "KeyToIdentityIds", user.acc);
+}
+
+// get multiple user's identity id.
+fn get_dids(users) {
+	let accounts = get_accounts(users);
+	return STORAGE.map_keys("Identity", "KeyToIdentityIds", accounts);
 }
 
 // Mock CDD for user and make sure they have POLYX.
@@ -39,6 +68,17 @@ fn gen_names(prefix, offset, count) {
 	return names;
 }
 
+fn cdd_providers() {
+	return [
+		USER.Alice,
+		USER["Alice//stash"],
+		USER.Bob,
+		USER.Charlie,
+		USER.Dave,
+		USER.Eve,
+	];
+}
+
 // Create a batch of users.
 fn create_users_batch(prefix, offset, count, balance) {
 	print(`CreateUsers: prefix='${prefix}', range=(${offset}..${count}), balance=${balance}`);
@@ -49,33 +89,47 @@ fn create_users_batch(prefix, offset, count, balance) {
 // Create users.
 fn create_users(names, balance) {
 	let users = [];
-	// Use Alice for mocking cdd.
+	// Alice for CDD.
 	let alice = USER.Alice;
 	
-	let calls = [];
+	// Generate users.
 	for name in names {
 		let user = USER[name];
 		users += user;
-	
-		let did = get_did(user);
+	}
+
+	// Query dids and balances.
+	let dids = get_dids(users);
+	let cur_bals = get_balances(users);
+
+	let last_res;
+	let calls = [];
+	//for name in names {
+	//	let user = USER[name];
+	//	users += user;
+	for (user, idx) in users {
+		let did = dids[idx];
+		let cur_bal = cur_bals[idx];
 		if did == () {
 			calls += TestUtils.mock_cdd_register_did(user);
 		}
-		let cur_bal = get_balance(user);
+		//print(`user: ${user}, cur: ${cur_bal}, bal: ${balance}`);
 		if cur_bal < balance {
 			calls += Sudo.sudo(Balances.set_balance(user, balance, 0));
 		}
-		if calls.len() > 600 {
-			let res = alice.submit(Utility.batch_optimistic(calls));
-			print(`res: ${res}`);
+		if calls.len() > 200 {
+			last_res = alice.submit(Utility.batch_optimistic(calls));
 			calls = [];
 		}
 	}
-	
+
 	// Final batch if there are still calls to make.
 	if calls.len() > 0 {
-		let res = alice.submit(Utility.batch_optimistic(calls));
-		print(`res: ${res}`);
+		last_res = alice.submit(Utility.batch_optimistic(calls));
+	}
+	if last_res != () {
+		print("Wait for final batch results");
+		print(`res: ${last_res}`);
 	}
 	return users;
 }
@@ -90,7 +144,7 @@ fn create_asset_batch(prefix, offset, count, supply) {
 // Create assets.
 fn create_assets(tickers, supply) {
 	// Use Alice doing batch calls.
-	let alice = USER.Alice;
+	let alice = USER.Bob; //Alice;
 
 	let ticker_to_issuer = |ticker| `Issuer_${ticker}`;
 	let issuers = create_users(tickers.map(ticker_to_issuer), 10000);
@@ -103,7 +157,7 @@ fn create_assets(tickers, supply) {
 			Asset.create_asset(`Token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), false),
 			Asset.issue(ticker, supply),
 		]));
-		if calls.len() > 200 {
+		if calls.len() > 100 {
 			let res = alice.submit(Utility.batch_optimistic(calls));
 			print(`res: ${res}`);
 			calls = [];
@@ -119,11 +173,23 @@ fn create_assets(tickers, supply) {
 }
 
 // Prepare `Utiltity.relay_tx` call.
-fn make_relay_tx(user, c) {
-	let acc = user.acc;
-	let nonce = STORAGE.map("Utility", "Nonces", acc);
+fn get_relay_tx_nonce(user) {
+	let nonce = STORAGE.map("Utility", "Nonces", user.acc);
 	if nonce == () {
 		nonce = 0;
+	}
+	return nonce;
+}
+
+// Prepare `Utiltity.relay_tx` call.
+fn make_relay_tx(user, c) {
+	return make_relay_tx_with_nonce(user, -1, c);
+}
+
+fn make_relay_tx_with_nonce(user, nonce, c) {
+	let acc = user.acc;
+	if nonce < 0 {
+		nonce = get_relay_tx_nonce(user);
 	}
 	let unique_call = #{
 		nonce: nonce,

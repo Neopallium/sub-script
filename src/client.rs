@@ -16,7 +16,7 @@ use sp_runtime::{
 use sp_version::RuntimeVersion;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{from_value, json, Value};
+use serde_json::{json, Value};
 
 use rhai::serde::from_dynamic;
 use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap};
@@ -329,6 +329,17 @@ impl InnerClient {
       .call_method("state_getStorage", json!([key, at_block]))
   }
 
+  pub fn get_storage_by_keys(
+    &self,
+    keys: &[StorageKey],
+    at_block: Option<BlockHash>,
+  ) -> Result<Vec<Option<StorageData>>, Box<EvalAltResult>> {
+    let tokens: Vec<RequestToken> = keys.into_iter()
+      .map(|k| self.rpc.async_call_method("state_getStorage", json!([k, at_block])))
+      .collect::<Result<Vec<_>, Box<EvalAltResult>>>()?;
+    self.rpc.get_responses(tokens.as_slice())
+  }
+
   pub fn get_storage_value(
     &self,
     module: &str,
@@ -398,51 +409,37 @@ impl InnerClient {
 
   pub fn get_request_block_hash(&self, token: RequestToken) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
     let hash = loop {
-      match self.rpc.get_response(token)? {
-        ResponseEvent::Update(resp) => {
-          log::debug!("extrinsic update: {:?}", resp);
-          match resp {
-            Some(value) => {
-              let status: TransactionStatus = from_value(value).map_err(|e| e.to_string())?;
-              match status {
-                TransactionStatus::InBlock(hash)
-                  | TransactionStatus::Finalized(hash)
-                  | TransactionStatus::FinalityTimeout(hash) => {
-                  break Some(hash);
-                },
-                TransactionStatus::Future => {
-                  log::warn!("Transaction in future (maybe nonce issue)");
-                },
-                TransactionStatus::Ready => {
-                  log::debug!("Transaction ready.");
-                },
-                TransactionStatus::Broadcast(nodes) => {
-                  log::debug!("Transaction broadcast: {:?}", nodes);
-                },
-                TransactionStatus::Retracted(hash) => {
-                  log::error!("Transaction retracted: {:?}", hash);
-                },
-                TransactionStatus::Usurped(tx_hash) => {
-                  log::error!("Transaction was replaced by another in the pool: {:?}", tx_hash);
-                },
-                TransactionStatus::Dropped => {
-                  log::error!("Transaction dropped.");
-                },
-                TransactionStatus::Invalid => {
-                  log::error!("Transaction invalid.");
-                },
-              }
-            }
-            None => {
-              break None;
-            }
-          }
-        }
-        ResponseEvent::Error(err) => Err(format!("{:?}", err))?,
-        resp => {
-          self.rpc.close_request(token)?;
-          Err(format!("Unexpected response event: {:?}.", resp))?
+      let status = self.rpc.get_update(token)?;
+      match status {
+        Some(TransactionStatus::InBlock(hash))
+          | Some(TransactionStatus::Finalized(hash))
+          | Some(TransactionStatus::FinalityTimeout(hash)) => {
+          break Some(hash);
         },
+        Some(TransactionStatus::Future) => {
+          log::warn!("Transaction in future (maybe nonce issue)");
+        },
+        Some(TransactionStatus::Ready) => {
+          log::debug!("Transaction ready.");
+        },
+        Some(TransactionStatus::Broadcast(nodes)) => {
+          log::debug!("Transaction broadcast: {:?}", nodes);
+        },
+        Some(TransactionStatus::Retracted(hash)) => {
+          log::error!("Transaction retracted: {:?}", hash);
+        },
+        Some(TransactionStatus::Usurped(tx_hash)) => {
+          log::error!("Transaction was replaced by another in the pool: {:?}", tx_hash);
+        },
+        Some(TransactionStatus::Dropped) => {
+          log::error!("Transaction dropped.");
+        },
+        Some(TransactionStatus::Invalid) => {
+          log::error!("Transaction invalid.");
+        },
+        None => {
+          break None;
+        }
       }
     };
     self.rpc.close_request(token)?;
@@ -515,6 +512,14 @@ impl Client {
     at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_storage_by_key(key, at_block)
+  }
+
+  pub fn get_storage_by_keys(
+    &self,
+    keys: &[StorageKey],
+    at_block: Option<BlockHash>,
+  ) -> Result<Vec<Option<StorageData>>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_storage_by_keys(keys, at_block)
   }
 
   pub fn get_storage_value(
