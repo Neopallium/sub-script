@@ -18,6 +18,8 @@ use sp_version::RuntimeVersion;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use dashmap::DashMap;
+
 use rhai::serde::from_dynamic;
 use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap};
 
@@ -238,6 +240,7 @@ pub struct InnerClient {
   metadata: Metadata,
   event_records: TypeRef,
   account_info: TypeRef,
+  cached_blocks: DashMap<BlockHash, Block>,
 }
 
 impl InnerClient {
@@ -259,6 +262,7 @@ impl InnerClient {
       metadata,
       event_records,
       account_info,
+      cached_blocks: DashMap::new(),
     })))
   }
 
@@ -309,7 +313,22 @@ impl InnerClient {
   }
 
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
-    Ok(self.get_signed_block(hash)?.map(|signed| signed.block))
+    // Only check for cached blocks when the hash is provided.
+    Ok(if let Some(hash) = hash {
+      let block = self.cached_blocks.get(&hash);
+      if block.is_some() {
+        block.as_deref().cloned()
+      } else {
+        let block = self.get_signed_block(Some(hash))?.map(|signed| signed.block);
+        if let Some(block) = &block {
+          // Cache new block.
+          self.cached_blocks.insert(hash, block.clone());
+        }
+        block
+      }
+    } else {
+      self.get_signed_block(hash)?.map(|signed| signed.block)
+    })
   }
 
   pub fn get_signed_block(
