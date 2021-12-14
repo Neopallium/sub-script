@@ -430,12 +430,15 @@ impl InnerClient {
         },
         Some(TransactionStatus::Usurped(tx_hash)) => {
           log::error!("Transaction was replaced by another in the pool: {:?}", tx_hash);
+          break None;
         },
         Some(TransactionStatus::Dropped) => {
           log::error!("Transaction dropped.");
+          break None;
         },
         Some(TransactionStatus::Invalid) => {
           log::error!("Transaction invalid.");
+          break None;
         },
         None => {
           break None;
@@ -654,6 +657,11 @@ impl ExtrinsicCallResult {
     Ok(())
   }
 
+  pub fn is_in_block(&mut self) -> Result<bool, Box<EvalAltResult>> {
+    self.get_block_hash()?;
+    Ok(self.hash.is_some())
+  }
+
   fn load_events(&mut self) -> Result<(), Box<EvalAltResult>> {
     if self.events.is_some() {
       return Ok(());
@@ -768,6 +776,7 @@ pub fn init_engine(
     .register_get_result("block", ExtrinsicCallResult::block)
     .register_get_result("result", ExtrinsicCallResult::result)
     .register_get_result("is_success", ExtrinsicCallResult::is_success)
+    .register_get_result("is_in_block", ExtrinsicCallResult::is_in_block)
     .register_get("xthex", ExtrinsicCallResult::xthex)
     .register_fn("to_string", ExtrinsicCallResult::to_string);
 

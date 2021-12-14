@@ -7,6 +7,16 @@ fn wait_for_results(results) {
 	}
 }
 
+// Wait for all calls to be included in a block.
+// This doesn't check if the call was successful.
+fn wait_for_in_block(results) {
+	for res in results {
+		if !res.is_in_block {
+			print(`call failed: Invalid or dropped`);
+		}
+	}
+}
+
 // get multiple user's account ids.
 fn get_accounts(users) {
 	return users.map(|u| u.acc);
@@ -88,6 +98,20 @@ fn cdd_providers() {
 	];
 }
 
+// Create a batch of keys.
+fn create_keys_batch(prefix, offset, count) {
+	print(`CreateKeys: prefix='${prefix}', range=(${offset}..${count})`);
+	let names = gen_names(prefix, offset, count);
+
+	// Generate keys.
+	let keys = [];
+	for name in names {
+		let key = USER[name];
+		keys += key;
+	}
+	return keys;
+}
+
 // Create a batch of users.
 fn create_users_batch(prefix, offset, count, balance) {
 	print(`CreateUsers: prefix='${prefix}', range=(${offset}..${count}), balance=${balance}`);
@@ -137,7 +161,7 @@ fn create_users(names, balance) {
 		results += alice.submit(Utility.batch_optimistic(calls));
 	}
 	print("CreateUsers: Wait for batch results");
-	wait_for_results(results);
+	wait_for_in_block(results);
 	return users;
 }
 
@@ -167,7 +191,7 @@ fn create_assets(tickers, supply) {
 	}
 	// Wait for all results.
 	print("CreateAssets: Wait for batch results");
-	wait_for_results(results);
+	wait_for_in_block(results);
 	
 	return issuers;
 }
