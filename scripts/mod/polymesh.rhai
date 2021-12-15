@@ -74,7 +74,8 @@ fn mock_user(user, balance) {
 		calls += TestUtils.mock_cdd_register_did(user);
 	}
 	calls += Sudo.sudo(Balances.set_balance(user, balance, 0));
-	USER.Alice.submit(Utility.batch_optimistic(calls));
+	let res = USER.Alice.submit(Utility.batch_optimistic(calls));
+	return res.is_in_block;
 }
 
 // Generate list of names from parameters.

@@ -241,6 +241,7 @@ pub struct InnerClient {
   event_records: TypeRef,
   account_info: TypeRef,
   cached_blocks: DashMap<BlockHash, Block>,
+  cached_events: DashMap<BlockHash, Dynamic>,
 }
 
 impl InnerClient {
@@ -263,6 +264,7 @@ impl InnerClient {
       event_records,
       account_info,
       cached_blocks: DashMap::new(),
+      cached_events: DashMap::new(),
     })))
   }
 
@@ -395,10 +397,26 @@ impl InnerClient {
     self.get_storage_by_key(key, at_block)
   }
 
-  pub fn get_events(&self, block: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
-    match self.get_storage_value("System", "Events", block)? {
+  fn get_block_events(&self, hash: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
+    match self.get_storage_value("System", "Events", hash)? {
       Some(value) => Ok(self.event_records.decode(value.0)?),
       None => Ok(Dynamic::UNIT),
+    }
+  }
+
+  pub fn get_events(&self, hash: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
+    if let Some(hash) = hash {
+      let events = self.cached_events.get(&hash);
+      if let Some(events) = events {
+        Ok(events.clone())
+      } else {
+        let events = self.get_block_events(Some(hash))?;
+        // Cache new events.
+        self.cached_events.insert(hash, events.clone());
+        Ok(events)
+      }
+    } else {
+      self.get_block_events(hash)
     }
   }
 
