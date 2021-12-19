@@ -490,8 +490,13 @@ impl TypeMeta {
         ))?;
       }
       TypeMeta::String => {
-        let s = value.into_immutable_string()?;
-        data.encode(s.as_str());
+        if value.is::<Vec<u8>>() {
+          let d = value.cast::<Vec<u8>>();
+          data.encode(d.as_slice());
+        } else {
+          let s = value.into_immutable_string()?;
+          data.encode(s.as_str());
+        }
       }
 
       TypeMeta::Tuple(types) => {
