@@ -357,6 +357,19 @@ impl InnerClient {
     self.rpc.call_method("chain_getBlock", json!([hash]))
   }
 
+  pub fn get_storage_keys_paged(
+    &self,
+    prefix: &StorageKey,
+    count: u32,
+    start_key: Option<&StorageKey>,
+  ) -> Result<Vec<StorageKey>, Box<EvalAltResult>> {
+    self
+      .rpc
+      .call_method("state_getKeysPaged", json!([
+        prefix, count, start_key.unwrap_or(prefix)
+      ])).map(|res| res.unwrap_or_default())
+  }
+
   pub fn get_storage_by_key(
     &self,
     key: StorageKey,
@@ -576,6 +589,15 @@ impl Client {
 
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
+  }
+
+  pub fn get_storage_keys_paged(
+    &self,
+    prefix: &StorageKey,
+    count: u32,
+    start_key: Option<&StorageKey>,
+  ) -> Result<Vec<StorageKey>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_storage_keys_paged(prefix, count, start_key)
   }
 
   pub fn get_storage_by_key(

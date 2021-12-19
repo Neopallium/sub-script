@@ -496,6 +496,22 @@ impl KeyHasher {
     Ok(StorageKey(buf))
   }
 
+  pub fn get_double_map_prefix(
+    &self,
+    mut buf: Vec<u8>,
+    key1: Dynamic,
+  ) -> Result<StorageKey, Box<EvalAltResult>> {
+    match self.type_hashers.len() {
+      2 => {
+        if !key1.is::<()>() {
+          self.hash_key(&mut buf, 0, key1)?;
+        }
+      }
+      _ => Err(format!("This storage isn't a double map type."))?,
+    }
+    Ok(StorageKey(buf))
+  }
+
   pub fn raw_map_key(
     &self,
     mut buf: Vec<u8>,
@@ -615,6 +631,29 @@ impl StorageMetadata {
       Some(hasher) => {
         let prefix = self.get_prefix_key();
         hasher.get_double_map_key(prefix, key1, key2)
+      }
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
+  }
+
+  pub fn get_map_prefix(&self) -> Result<StorageKey, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(_hasher) => {
+        let prefix = self.get_prefix_key();
+        Ok(StorageKey(prefix))
+      }
+      None => Err(format!("This storage type doesn't have keys.").into()),
+    }
+  }
+
+  pub fn get_double_map_prefix(
+    &self,
+    key1: Dynamic,
+  ) -> Result<StorageKey, Box<EvalAltResult>> {
+    match &self.key_hasher {
+      Some(hasher) => {
+        let prefix = self.get_prefix_key();
+        hasher.get_double_map_prefix(prefix, key1)
       }
       None => Err(format!("This storage type doesn't have keys.").into()),
     }
