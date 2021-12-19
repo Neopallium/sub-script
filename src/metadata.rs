@@ -993,6 +993,10 @@ impl FuncMetadata {
     Dynamic::from(args)
   }
 
+  fn name(&mut self) -> String {
+    self.name.clone()
+  }
+
   fn title(&mut self) -> String {
     self.docs.title()
   }
@@ -1147,6 +1151,7 @@ pub fn init_engine(
     .register_type_with_name::<FuncMetadata>("FuncMetadata")
     .register_fn("to_string", FuncMetadata::to_string)
     .register_get("args", FuncMetadata::args)
+    .register_get("name", FuncMetadata::name)
     .register_get("title", FuncMetadata::title)
     .register_get("docs", FuncMetadata::docs)
     .register_type_with_name::<FuncArg>("FuncArg")
