@@ -35,12 +35,13 @@ impl Storage {
     md: &StorageMetadata,
     keys: &[StorageKey],
   ) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
-    self.client.get_storage_by_keys(keys, None)?
-      .into_iter().map(|val| {
-        match val {
-          Some(val) => md.decode_value(val.0),
-          None => Ok(Dynamic::UNIT),
-        }
+    self
+      .client
+      .get_storage_by_keys(keys, None)?
+      .into_iter()
+      .map(|val| match val {
+        Some(val) => md.decode_value(val.0),
+        None => Ok(Dynamic::UNIT),
       })
       .collect()
   }
@@ -73,7 +74,9 @@ impl Storage {
     keys: Vec<Dynamic>,
   ) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
     let md = self.metadata.get_storage(mod_name, storage_name)?;
-    let keys = keys.into_iter().map(|k| md.get_map_key(k))
+    let keys = keys
+      .into_iter()
+      .map(|k| md.get_map_key(k))
       .collect::<Result<Vec<_>, Box<EvalAltResult>>>()?;
     self.get_by_keys(md, &keys)
   }

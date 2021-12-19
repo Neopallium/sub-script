@@ -6,8 +6,8 @@ use hex::FromHex;
 use frame_metadata::RuntimeMetadataPrefixed;
 use parity_scale_codec::{Compact, Decode, Encode};
 use sp_core::{
-  storage::{StorageData, StorageKey},
   hashing::blake2_256,
+  storage::{StorageData, StorageKey},
   Pair, H256,
 };
 use sp_runtime::{
@@ -332,7 +332,9 @@ impl InnerClient {
       if block.is_some() {
         block.as_deref().cloned()
       } else {
-        let block = self.get_signed_block(Some(hash))?.map(|signed| signed.block);
+        let block = self
+          .get_signed_block(Some(hash))?
+          .map(|signed| signed.block);
         if let Some(block) = &block {
           // Cache new block.
           self.cached_blocks.insert(hash, block.clone());
@@ -344,9 +346,7 @@ impl InnerClient {
     })
   }
 
-  pub fn get_chain_properties(
-    &self,
-  ) -> Result<Option<ChainProperties>, Box<EvalAltResult>> {
+  pub fn get_chain_properties(&self) -> Result<Option<ChainProperties>, Box<EvalAltResult>> {
     self.rpc.call_method("system_properties", json!([]))
   }
 
@@ -372,8 +372,13 @@ impl InnerClient {
     keys: &[StorageKey],
     at_block: Option<BlockHash>,
   ) -> Result<Vec<Option<StorageData>>, Box<EvalAltResult>> {
-    let tokens: Vec<RequestToken> = keys.into_iter()
-      .map(|k| self.rpc.async_call_method("state_getStorage", json!([k, at_block])))
+    let tokens: Vec<RequestToken> = keys
+      .into_iter()
+      .map(|k| {
+        self
+          .rpc
+          .async_call_method("state_getStorage", json!([k, at_block]))
+      })
       .collect::<Result<Vec<_>, Box<EvalAltResult>>>()?;
     self.rpc.get_responses(tokens.as_slice())
   }
@@ -461,39 +466,45 @@ impl InnerClient {
     }
   }
 
-  pub fn get_request_block_hash(&self, token: RequestToken) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
+  pub fn get_request_block_hash(
+    &self,
+    token: RequestToken,
+  ) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
     let hash = loop {
       let status = self.rpc.get_update(token)?;
       match status {
         Some(TransactionStatus::InBlock(hash))
-          | Some(TransactionStatus::Finalized(hash))
-          | Some(TransactionStatus::FinalityTimeout(hash)) => {
+        | Some(TransactionStatus::Finalized(hash))
+        | Some(TransactionStatus::FinalityTimeout(hash)) => {
           break Some(hash);
-        },
+        }
         Some(TransactionStatus::Future) => {
           log::warn!("Transaction in future (maybe nonce issue)");
-        },
+        }
         Some(TransactionStatus::Ready) => {
           log::debug!("Transaction ready.");
-        },
+        }
         Some(TransactionStatus::Broadcast(nodes)) => {
           log::debug!("Transaction broadcast: {:?}", nodes);
-        },
+        }
         Some(TransactionStatus::Retracted(hash)) => {
           log::error!("Transaction retracted: {:?}", hash);
-        },
+        }
         Some(TransactionStatus::Usurped(tx_hash)) => {
-          log::error!("Transaction was replaced by another in the pool: {:?}", tx_hash);
+          log::error!(
+            "Transaction was replaced by another in the pool: {:?}",
+            tx_hash
+          );
           break None;
-        },
+        }
         Some(TransactionStatus::Dropped) => {
           log::error!("Transaction dropped.");
           break None;
-        },
+        }
         Some(TransactionStatus::Invalid) => {
           log::error!("Transaction invalid.");
           break None;
-        },
+        }
         None => {
           break None;
         }
@@ -580,7 +591,11 @@ impl Client {
     keys: &[StorageKey],
     at_block: Option<BlockHash>,
   ) -> Result<Vec<Option<StorageData>>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_storage_by_keys(keys, at_block)
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_storage_by_keys(keys, at_block)
   }
 
   pub fn get_storage_value(
@@ -633,12 +648,11 @@ impl Client {
     self.inner.read().unwrap().get_nonce(account)
   }
 
-  pub fn get_request_block_hash(&self, token: RequestToken) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
-    self
-      .inner
-      .read()
-      .unwrap()
-      .get_request_block_hash(token)
+  pub fn get_request_block_hash(
+    &self,
+    token: RequestToken,
+  ) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_request_block_hash(token)
   }
 
   pub fn submit(&self, xthex: String) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
@@ -841,10 +855,16 @@ pub fn init_engine(
   let client = Client::connect(rpc.clone(), lookup)?;
 
   // Get the `tokenDecimals` value from the chain properties.
-  let token_decimals = client.get_chain_properties()?
-    .map(|p| p.token_decimals).unwrap_or(0);
+  let token_decimals = client
+    .get_chain_properties()?
+    .map(|p| p.token_decimals)
+    .unwrap_or(0);
   let balance_scale = 10u128.pow(token_decimals);
-  log::info!("token_deciamls: {:?}, balance_scale={:?}", token_decimals, balance_scale);
+  log::info!(
+    "token_deciamls: {:?}, balance_scale={:?}",
+    token_decimals,
+    balance_scale
+  );
   lookup.custom_encode("Balance", TypeId::of::<INT>(), move |value, data| {
     let mut val = value.cast::<INT>() as u128;
     val *= balance_scale;
