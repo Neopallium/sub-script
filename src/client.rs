@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::sync::{Arc, RwLock};
 
 use hex::FromHex;
@@ -20,8 +21,10 @@ use serde_json::{json, Value};
 
 use dashmap::DashMap;
 
+use rust_decimal::{prelude::ToPrimitive, Decimal};
+
 use rhai::serde::from_dynamic;
-use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap};
+use rhai::{Dynamic, Engine, EvalAltResult, Map as RMap, INT};
 
 use crate::metadata::{EncodedCall, Metadata};
 use crate::rpc::*;
@@ -233,6 +236,14 @@ impl EventRecords {
   }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChainProperties {
+  pub ss58_format: u32,
+  pub token_decimals: u32,
+  pub token_symbol: String,
+}
+
 pub struct InnerClient {
   rpc: RpcHandler,
   runtime_version: RuntimeVersion,
@@ -331,6 +342,12 @@ impl InnerClient {
     } else {
       self.get_signed_block(hash)?.map(|signed| signed.block)
     })
+  }
+
+  pub fn get_chain_properties(
+    &self,
+  ) -> Result<Option<ChainProperties>, Box<EvalAltResult>> {
+    self.rpc.call_method("system_properties", json!([]))
   }
 
   pub fn get_signed_block(
@@ -540,6 +557,10 @@ impl Client {
 
   pub fn get_signed_extra(&self) -> AdditionalSigned {
     self.inner.read().unwrap().get_signed_extra()
+  }
+
+  pub fn get_chain_properties(&self) -> Result<Option<ChainProperties>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_chain_properties()
   }
 
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
@@ -818,5 +839,46 @@ pub fn init_engine(
     .register_fn("to_string", ExtrinsicCallResult::to_string);
 
   let client = Client::connect(rpc.clone(), lookup)?;
+
+  // Get the `tokenDecimals` value from the chain properties.
+  let token_decimals = client.get_chain_properties()?
+    .map(|p| p.token_decimals).unwrap_or(0);
+  let balance_scale = 10u128.pow(token_decimals);
+  log::info!("token_deciamls: {:?}, balance_scale={:?}", token_decimals, balance_scale);
+  lookup.custom_encode("Balance", TypeId::of::<INT>(), move |value, data| {
+    let mut val = value.cast::<INT>() as u128;
+    val *= balance_scale;
+    if data.is_compact() {
+      data.encode(Compact::<u128>(val));
+    } else {
+      data.encode(val);
+    }
+    Ok(())
+  })?;
+  lookup.custom_encode("Balance", TypeId::of::<Decimal>(), move |value, data| {
+    let mut dec = value.cast::<Decimal>();
+    dec *= Decimal::from(balance_scale);
+    let val = dec
+      .to_u128()
+      .ok_or_else(|| format!("Expected unsigned integer"))?;
+    if data.is_compact() {
+      data.encode(Compact::<u128>(val));
+    } else {
+      data.encode(val);
+    }
+    Ok(())
+  })?;
+  lookup.custom_decode("Balance", move |mut input| {
+    let mut val = Decimal::from(u128::decode(&mut input)?);
+    val /= Decimal::from(balance_scale);
+    Ok(Dynamic::from_decimal(val))
+  })?;
+  lookup.custom_decode("Compact<Balance>", move |mut input| {
+    let num = Compact::<u128>::decode(&mut input)?;
+    let mut val = Decimal::from(num.0);
+    val /= Decimal::from(balance_scale);
+    Ok(Dynamic::from_decimal(val))
+  })?;
+
   Ok(client)
 }
