@@ -109,8 +109,14 @@ pub fn init_engine(
     .register_type_with_name::<Claim>("Claim")
     .register_type_with_name::<InvestorZKProofData>("InvestorZKProofData")
     .register_type_with_name::<IdentityId>("IdentityId")
+    .register_fn("to_string", |did: &mut IdentityId| format!("{:?}", did))
     .register_type_with_name::<InvestorUid>("InvestorUid")
-    .register_type_with_name::<Ticker>("Ticker");
+    .register_fn("to_string", |uid: &mut InvestorUid| format!("{:?}", uid))
+    .register_type_with_name::<Ticker>("Ticker")
+    .register_fn("to_string", |ticker: &mut Ticker| {
+      let s = String::from_utf8_lossy(ticker.as_slice());
+      format!("{}", s)
+    });
 
   let utils = PolymeshUtils::new(client.clone())?;
   globals.insert("PolymeshUtils".into(), Dynamic::from(utils.clone()));
