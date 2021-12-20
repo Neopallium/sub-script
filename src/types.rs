@@ -8,6 +8,7 @@ use std::sync::{Arc, RwLock};
 use parity_scale_codec::{Compact, Decode, Encode, Error as PError, Input};
 use serde_json::{Map, Value};
 
+use sp_core::crypto::Ss58Codec;
 use sp_runtime::{generic::Era, MultiSignature};
 
 use rust_decimal::{prelude::ToPrimitive, Decimal};
@@ -1203,6 +1204,12 @@ pub fn init_engine(
   })?;
   types.custom_encode("AccountId", TypeId::of::<AccountId>(), |value, data| {
     data.encode(value.cast::<AccountId>());
+    Ok(())
+  })?;
+  types.custom_encode("AccountId", TypeId::of::<ImmutableString>(), |value, data| {
+    let val = value.cast::<ImmutableString>();
+    let acc = AccountId::from_string(&val).map_err(|e| format!("{:?}", e))?;
+    data.encode(acc);
     Ok(())
   })?;
   types.custom_decode("AccountId", |mut input| {

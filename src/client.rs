@@ -1,11 +1,13 @@
 use std::any::TypeId;
 use std::sync::{Arc, RwLock};
+use std::convert::TryFrom;
 
 use hex::FromHex;
 
 use frame_metadata::RuntimeMetadataPrefixed;
 use parity_scale_codec::{Compact, Decode, Encode};
 use sp_core::{
+  crypto::{set_default_ss58_version, Ss58AddressFormat},
   hashing::blake2_256,
   storage::{StorageData, StorageKey},
   Pair, H256,
@@ -239,7 +241,7 @@ impl EventRecords {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainProperties {
-  pub ss58_format: u32,
+  pub ss58_format: u16,
   pub token_decimals: u32,
   pub token_symbol: String,
 }
@@ -876,10 +878,19 @@ pub fn init_engine(
 
   let client = Client::connect(rpc.clone(), lookup)?;
 
+  // Get Chain properties.
+  let chain_props = client
+    .get_chain_properties()?;
+  // Set default ss58 format.
+  let ss58_format = chain_props.as_ref().and_then(|p| {
+    Ss58AddressFormat::try_from(p.ss58_format).ok()
+  });
+  if let Some(ss58_format) = ss58_format {
+    set_default_ss58_version(ss58_format);
+  }
+
   // Get the `tokenDecimals` value from the chain properties.
-  let token_decimals = client
-    .get_chain_properties()?
-    .map(|p| p.token_decimals)
+  let token_decimals = chain_props.as_ref().map(|p| p.token_decimals)
     .unwrap_or(0);
   let balance_scale = 10u128.pow(token_decimals);
   log::info!(
