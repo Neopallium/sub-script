@@ -1,6 +1,6 @@
 use std::any::TypeId;
-use std::sync::{Arc, RwLock};
 use std::convert::TryFrom;
+use std::sync::{Arc, RwLock};
 
 use hex::FromHex;
 
@@ -367,9 +367,11 @@ impl InnerClient {
   ) -> Result<Vec<StorageKey>, Box<EvalAltResult>> {
     self
       .rpc
-      .call_method("state_getKeysPaged", json!([
-        prefix, count, start_key.unwrap_or(prefix)
-      ])).map(|res| res.unwrap_or_default())
+      .call_method(
+        "state_getKeysPaged",
+        json!([prefix, count, start_key.unwrap_or(prefix)]),
+      )
+      .map(|res| res.unwrap_or_default())
   }
 
   pub fn get_storage_by_key(
@@ -599,7 +601,11 @@ impl Client {
     count: u32,
     start_key: Option<&StorageKey>,
   ) -> Result<Vec<StorageKey>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_storage_keys_paged(prefix, count, start_key)
+    self
+      .inner
+      .read()
+      .unwrap()
+      .get_storage_keys_paged(prefix, count, start_key)
   }
 
   pub fn get_storage_by_key(
@@ -885,19 +891,17 @@ pub fn init_engine(
   let client = Client::connect(rpc.clone(), lookup)?;
 
   // Get Chain properties.
-  let chain_props = client
-    .get_chain_properties()?;
+  let chain_props = client.get_chain_properties()?;
   // Set default ss58 format.
-  let ss58_format = chain_props.as_ref().and_then(|p| {
-    Ss58AddressFormat::try_from(p.ss58_format).ok()
-  });
+  let ss58_format = chain_props
+    .as_ref()
+    .and_then(|p| Ss58AddressFormat::try_from(p.ss58_format).ok());
   if let Some(ss58_format) = ss58_format {
     set_default_ss58_version(ss58_format);
   }
 
   // Get the `tokenDecimals` value from the chain properties.
-  let token_decimals = chain_props.as_ref().map(|p| p.token_decimals)
-    .unwrap_or(0);
+  let token_decimals = chain_props.as_ref().map(|p| p.token_decimals).unwrap_or(0);
   let balance_scale = 10u128.pow(token_decimals);
   log::info!(
     "token_deciamls: {:?}, balance_scale={:?}",

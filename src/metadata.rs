@@ -646,10 +646,7 @@ impl StorageMetadata {
     }
   }
 
-  pub fn get_double_map_prefix(
-    &self,
-    key1: Dynamic,
-  ) -> Result<StorageKey, Box<EvalAltResult>> {
+  pub fn get_double_map_prefix(&self, key1: Dynamic) -> Result<StorageKey, Box<EvalAltResult>> {
     match &self.key_hasher {
       Some(hasher) => {
         let prefix = self.get_prefix_key();

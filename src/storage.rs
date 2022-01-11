@@ -12,7 +12,7 @@ pub struct StorageKeysPaged {
   prefix: StorageKey,
   count: u32,
   start_key: Option<StorageKey>,
-  finished: bool
+  finished: bool,
 }
 
 impl StorageKeysPaged {
@@ -39,16 +39,15 @@ impl StorageKeysPaged {
     !self.finished
   }
 
-  fn next(
-    &mut self,
-  ) -> Result<Dynamic, Box<EvalAltResult>> {
+  fn next(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
     if self.finished {
       // No more pages.
       return Ok(Dynamic::UNIT);
     }
-    let keys = self
-      .client
-      .get_storage_keys_paged(&self.prefix, self.count, self.start_key.as_ref())?;
+    let keys =
+      self
+        .client
+        .get_storage_keys_paged(&self.prefix, self.count, self.start_key.as_ref())?;
     if keys.len() < self.count as usize {
       self.finished = true;
       if keys.len() == 0 {
@@ -59,7 +58,8 @@ impl StorageKeysPaged {
       self.start_key = keys.last().cloned();
     }
 
-    let result: Vec<Dynamic> = self.client
+    let result: Vec<Dynamic> = self
+      .client
       .get_storage_by_keys(&keys, None)?
       .into_iter()
       .map(|val| match val {

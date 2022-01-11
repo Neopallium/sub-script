@@ -1206,12 +1206,16 @@ pub fn init_engine(
     data.encode(value.cast::<AccountId>());
     Ok(())
   })?;
-  types.custom_encode("AccountId", TypeId::of::<ImmutableString>(), |value, data| {
-    let val = value.cast::<ImmutableString>();
-    let acc = AccountId::from_string(&val).map_err(|e| format!("{:?}", e))?;
-    data.encode(acc);
-    Ok(())
-  })?;
+  types.custom_encode(
+    "AccountId",
+    TypeId::of::<ImmutableString>(),
+    |value, data| {
+      let val = value.cast::<ImmutableString>();
+      let acc = AccountId::from_string(&val).map_err(|e| format!("{:?}", e))?;
+      data.encode(acc);
+      Ok(())
+    },
+  )?;
   types.custom_decode("AccountId", |mut input| {
     Ok(Dynamic::from(AccountId::decode(&mut input)?))
   })?;
