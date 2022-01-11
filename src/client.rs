@@ -758,6 +758,11 @@ impl ExtrinsicCallResult {
     Ok(self.hash.is_some())
   }
 
+  pub fn block_hash(&mut self) -> Result<String, Box<EvalAltResult>> {
+    self.get_block_hash()?;
+    Ok(self.hash.unwrap_or_default().to_string())
+  }
+
   fn load_events(&mut self) -> Result<(), Box<EvalAltResult>> {
     if self.events.is_some() {
       return Ok(());
@@ -870,6 +875,7 @@ pub fn init_engine(
     .register_result_fn("events", ExtrinsicCallResult::events_filtered)
     .register_get_result("events", ExtrinsicCallResult::events)
     .register_get_result("block", ExtrinsicCallResult::block)
+    .register_get_result("block_hash", ExtrinsicCallResult::block_hash)
     .register_get_result("result", ExtrinsicCallResult::result)
     .register_get_result("is_success", ExtrinsicCallResult::is_success)
     .register_get_result("is_in_block", ExtrinsicCallResult::is_in_block)
