@@ -226,6 +226,23 @@ fn make_relay_tx_with_nonce(user, nonce, c) {
 	return Utility.relay_tx(acc, sig, unique_call);
 }
 
+fn validate_investor_uniqueness_claim(target, claim, proof) {
+	let ty_did = Types.resolve("IdentityId");
+	let target = ty_did.decode(ty_did.encode(target));
+	print(`target = ${target}`);
+	let ty_claim = Types.resolve("Claim");
+	let claim = ty_claim.decode(ty_claim.encode(claim));
+	print(`claim = ${claim}`);
+	let ty_proof = Types.resolve("InvestorZKProofData");
+	let proof = ty_proof.decode(ty_proof.encode(proof));
+	print(`proof = ${proof}`);
+
+	let is_valid = PolymeshUtils.validate_investor_uniqueness(target, claim, proof);
+	print(`is_valid = ${is_valid}`);
+
+	return is_valid;
+}
+
 fn add_investor_uniqueness_claim(user, ticker) {
 	print("add_investor_uniqueness_claim");
 	// Create investor uniqueness claim & proof.

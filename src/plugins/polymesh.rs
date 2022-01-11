@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString};
 
 use polymesh_primitives::{
-  investor_zkproof_data::v1::InvestorZKProofData, CddId, Claim, IdentityId, InvestorUid, Scope,
+  investor_zkproof_data::v1, valid_proof_of_investor, CddId, Claim, IdentityId, InvestorUid, Scope,
   Ticker,
 };
 
@@ -74,13 +74,33 @@ impl PolymeshUtils {
     ));
     let ticker = str_to_ticker(ticker)?;
 
-    let proof = InvestorZKProofData::new(&did, &uid, &ticker);
+    let proof = v1::InvestorZKProofData::new(&did, &uid, &ticker);
     let cdd_id = CddId::new_v1(did, uid);
 
-    let scope_id = InvestorZKProofData::make_scope_id(&ticker.as_slice(), &uid);
+    let scope_id = v1::InvestorZKProofData::make_scope_id(&ticker.as_slice(), &uid);
 
     let claim = Claim::InvestorUniqueness(Scope::Ticker(ticker), scope_id, cdd_id);
     Ok(vec![Dynamic::from(claim), Dynamic::from(proof)])
+  }
+
+  pub fn validate_investor_uniqueness(
+    &mut self,
+    target: IdentityId,
+    claim: Claim,
+    proof: v1::InvestorZKProofData,
+  ) -> Result<bool, Box<EvalAltResult>> {
+    // Decode needed fields and ensures `claim` is `InvestorUniqueness*`.
+    let (scope, _scope_id, _cdd_id) = match &claim {
+      Claim::InvestorUniqueness(scope, scope_id, cdd_id) => (scope, scope_id.clone(), cdd_id),
+      Claim::InvestorUniquenessV2(_cdd_id) => {
+        return Err(format!("Unsupported V2 uniqueness claim.").into());
+      }
+      _ => Err(format!("ClaimVariantNotAllowed"))?,
+    };
+
+    // Verify the confidential claim.
+    let is_valid = valid_proof_of_investor::v1::evaluate_claim(scope, &claim, &target, &proof);
+    Ok(is_valid)
   }
 }
 
@@ -105,9 +125,13 @@ pub fn init_engine(
       "create_investor_uniqueness",
       PolymeshUtils::create_investor_uniqueness,
     )
+    .register_result_fn(
+      "validate_investor_uniqueness",
+      PolymeshUtils::validate_investor_uniqueness,
+    )
     .register_fn("make_cdd_claim", PolymeshUtils::make_cdd_claim)
     .register_type_with_name::<Claim>("Claim")
-    .register_type_with_name::<InvestorZKProofData>("InvestorZKProofData")
+    .register_type_with_name::<v1::InvestorZKProofData>("InvestorZKProofData")
     .register_type_with_name::<IdentityId>("IdentityId")
     .register_fn("to_string", |did: &mut IdentityId| format!("{:?}", did))
     .register_type_with_name::<InvestorUid>("InvestorUid")
@@ -157,14 +181,20 @@ pub fn init_engine(
     data.encode(value.cast::<Claim>());
     Ok(())
   })?;
+  lookup.custom_decode("Claim", |mut input| {
+    Ok(Dynamic::from(Claim::decode(&mut input)?))
+  })?;
   lookup.custom_encode(
     "InvestorZKProofData",
-    TypeId::of::<InvestorZKProofData>(),
+    TypeId::of::<v1::InvestorZKProofData>(),
     |value, data| {
-      data.encode(value.cast::<InvestorZKProofData>());
+      data.encode(value.cast::<v1::InvestorZKProofData>());
       Ok(())
     },
   )?;
+  lookup.custom_decode("InvestorZKProofData", |mut input| {
+    Ok(Dynamic::from(v1::InvestorZKProofData::decode(&mut input)?))
+  })?;
   lookup.custom_encode(
     "OffChainSignature",
     TypeId::of::<MultiSignature>(),
