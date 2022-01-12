@@ -90,7 +90,7 @@ fn secondary_key_complexity(key) {
 // Calculate the total complexity of permissions in DidRecord.
 fn did_record_complexity(record) {
 	let complexity = 0;
-	for key in keys {
+	for key in record.secondary_keys {
 		let key_complexity = secondary_key_complexity(key);
 		complexity += key_complexity;
 	}
@@ -117,7 +117,6 @@ do {
 	for record in records {
 		let keys = record.secondary_keys;
 		let keys_len = keys.len();
-		let did_complexity = 0;
 		total_keys += keys_len;
 		if keys_len > max_keys {
 			max_keys = keys_len;
@@ -126,9 +125,12 @@ do {
 			print(` -- primary = ${record.primary_key}`);
 			print(` -- secondary keys = ${keys_len}`);
 		}
+		let did_complexity = did_record_complexity(record);
+		if did_complexity > max_did_complexity {
+			max_did_complexity = did_complexity;
+		}
 		for key in keys {
 			let perm_complexity = secondary_key_complexity(key);
-			did_complexity += perm_complexity;
 			if perm_complexity > max_permissions_complexity {
 				max_permissions_complexity = perm_complexity;
 			}
@@ -170,9 +172,6 @@ do {
 					}
 				}
 			}
-		}
-		if did_complexity > max_did_complexity {
-			max_did_complexity = did_complexity;
 		}
 	}
 	total_dids += records.len();
