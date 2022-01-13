@@ -225,8 +225,15 @@ impl SubstrateApp {
     if res.retcode == APDUErrorCodes::NoError as u16 {
       Ok(res.data)
     } else {
-      log::error!("Ledger: error: code={:#X?}", res.retcode);
-      Err(ledger_apdu::map_apdu_error_description(res.retcode).into())
+      let msg = String::from_utf8_lossy(&res.data);
+      let err = ledger_apdu::map_apdu_error_description(res.retcode);
+      if msg.len() > 0 {
+        log::error!("Ledger: error: msg={}, error={}, code={:#X?}", msg, err, res.retcode);
+        Err(format!("Ledger: error: msg={}, error={}", msg, err).into())
+      } else {
+        log::error!("Ledger: error: error={}, code={:#X?}", err, res.retcode);
+        Err(format!("Ledger: error: error={}", err).into())
+      }
     }
   }
 
