@@ -544,6 +544,18 @@ impl KeyHasher {
     }
     Ok(StorageKey(buf))
   }
+
+  fn hasher_name(&mut self) -> String {
+    let hashers = self
+      .type_hashers
+      .iter_mut()
+      .map(|(t, h)| {
+        format!("{}: {:?}", t.get_name(), h)
+      })
+      .collect::<Vec<String>>()
+      .join(", ");
+    format!("Hasher: {}", hashers)
+  }
 }
 
 #[derive(Clone)]
@@ -700,6 +712,21 @@ impl StorageMetadata {
 
   pub fn decode_value(&self, data: Vec<u8>) -> Result<Dynamic, Box<EvalAltResult>> {
     self.value_ty.decode(data)
+  }
+
+  fn name(&mut self) -> String {
+    self.name.clone()
+  }
+
+  fn hasher_name(&mut self) -> String {
+    match &mut self.key_hasher {
+      Some(key_hasher) => key_hasher.hasher_name(),
+      None => format!("None"),
+    }
+  }
+
+  fn value_type_name(&mut self) -> String {
+    self.value_ty.get_name()
   }
 
   fn title(&mut self) -> String {
@@ -1186,6 +1213,9 @@ pub fn init_engine(
     .register_indexer_get_result(ModuleMetadata::indexer_get)
     .register_type_with_name::<StorageMetadata>("StorageMetadata")
     .register_fn("to_string", StorageMetadata::to_string)
+    .register_get("name", StorageMetadata::name)
+    .register_get("value_type_name", StorageMetadata::value_type_name)
+    .register_get("hasher_name", StorageMetadata::hasher_name)
     .register_get("title", StorageMetadata::title)
     .register_get("docs", StorageMetadata::docs)
     .register_type_with_name::<FuncMetadata>("FuncMetadata")
@@ -1197,9 +1227,9 @@ pub fn init_engine(
     .register_get("docs", FuncMetadata::docs)
     .register_type_with_name::<FuncArg>("FuncArg")
     .register_fn("to_string", FuncArg::to_string)
-    .register_fn("name", FuncArg::get_name)
-    .register_fn("type", FuncArg::get_type)
-    .register_fn("meta", FuncArg::get_meta)
+    .register_get("name", FuncArg::get_name)
+    .register_get("type", FuncArg::get_type)
+    .register_get("meta", FuncArg::get_meta)
     .register_type_with_name::<EventMetadata>("EventMetadata")
     .register_fn("to_string", EventMetadata::to_string)
     .register_get("args", EventMetadata::args)
@@ -1210,9 +1240,9 @@ pub fn init_engine(
     .register_get("title", ConstMetadata::title)
     .register_get("docs", ConstMetadata::docs)
     .register_type_with_name::<ErrorMetadata>("ErrorMetadata")
+    .register_fn("to_string", ErrorMetadata::to_string)
     .register_get("name", ErrorMetadata::name)
     .register_get("index", ErrorMetadata::index)
-    .register_fn("to_string", ErrorMetadata::to_string)
     .register_get("title", ErrorMetadata::title)
     .register_get("docs", ErrorMetadata::docs)
     .register_type_with_name::<NamedType>("NamedType")

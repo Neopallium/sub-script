@@ -15,6 +15,22 @@ for mod in modules {
 	for func in funcs {
 		let name = func.name;
 		let idx = func.index;
-		print(`  Func: ${idx} -> ${name}`);
+		let args = func.args.map(|t| t.type);
+		print(`  Func: ${idx} -> ${name}(${args})`);
+	}
+	let storage = mod.storage;
+	storage.sort(|s1, s2| {
+		let s1 = s1.name;
+		let s2 = s2.name;
+		if s1 == s2 {
+			return 0;
+		} else if s1 < s2 {
+			return -1;
+		} else {
+			return 1;
+		}
+	});
+	for storage in storage {
+		print(`  Storage: ${storage.name}: map_keys=${storage.hasher_name}, value=${storage.value_type_name}`);
 	}
 }
