@@ -10,8 +10,11 @@ if name == () {
 }
 
 let user = USER[name];
+print(`key = ${user.acc}`);
 let did = p::get_did(user);
 print(`did = ${did}`);
+let balance = p::get_balance(user);
+print(`balance = ${balance}`);
 
 let records = STORAGE.map("Identity", "DidRecords", did);
 let primary = records.primary_key;
