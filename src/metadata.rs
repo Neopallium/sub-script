@@ -3,12 +3,25 @@ use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use frame_metadata::{
-  DecodeDifferent, DecodeDifferentArray, FunctionArgumentMetadata, FunctionMetadata,
-  RuntimeMetadata, RuntimeMetadataPrefixed, StorageEntryType, StorageHasher, META_RESERVED,
+  RuntimeMetadata, RuntimeMetadataPrefixed,
+};
+#[cfg(any(
+	feature = "v13",
+	feature = "v12",
+))]
+use frame_metadata::decode_different::{
+  DecodeDifferent, DecodeDifferentArray,
 };
 use frame_support::{
   Blake2_128, Blake2_128Concat, Blake2_256, StorageHasher as StorageHasherTrait, Twox128, Twox256,
   Twox64Concat,
+};
+#[cfg(feature = "v14")]
+use scale_info::{
+  form::PortableForm,
+  PortableRegistry,
+  Type, TypeDef, TypeDefPrimitive,
+  Variant, Field,
 };
 use parity_scale_codec::{Encode, Output};
 use sp_core::{self, storage::StorageKey};
@@ -19,6 +32,10 @@ use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, INT};
 use crate::client::Client;
 use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
 
+#[cfg(any(
+	feature = "v13",
+	feature = "v12",
+))]
 fn decode_meta<B: 'static, O: 'static>(
   encoded: &DecodeDifferent<B, O>,
 ) -> Result<&O, Box<EvalAltResult>> {
@@ -39,18 +56,44 @@ impl Metadata {
     metadata_prefixed: RuntimeMetadataPrefixed,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
-    if metadata_prefixed.0 != META_RESERVED {
-      return Err(format!("Invalid metadata prefix {}", metadata_prefixed.0).into());
-    }
-
     // Get versioned metadata.
     let md = match metadata_prefixed.1 {
-      RuntimeMetadata::V12(v12) => v12,
+      #[cfg(feature = "v12")]
+      RuntimeMetadata::V12(v12) => {
+        if metadata_prefixed.0 != frame_metadata::v12::META_RESERVED {
+          return Err(format!("Invalid metadata prefix {}", metadata_prefixed.0).into());
+        }
+
+        Self::from_v12_metadata(v12, lookup)?
+      },
+      #[cfg(feature = "v13")]
+      RuntimeMetadata::V13(v13) => {
+        if metadata_prefixed.0 != frame_metadata::v13::META_RESERVED {
+          return Err(format!("Invalid metadata prefix {}", metadata_prefixed.0).into());
+        }
+
+        Self::from_v13_metadata(v13, lookup)?
+      }
+      #[cfg(feature = "v14")]
+      RuntimeMetadata::V14(v14) => {
+        if metadata_prefixed.0 != frame_metadata::META_RESERVED {
+          return Err(format!("Invalid metadata prefix {}", metadata_prefixed.0).into());
+        }
+
+        Self::from_v14_metadata(v14, lookup)?
+      }
       _ => {
         return Err(format!("Unsupported metadata version").into());
       }
     };
+    Ok(md)
+  }
 
+  #[cfg(feature = "v12")]
+  fn from_v12_metadata(
+    md: frame_metadata::v12::RuntimeMetadataV12,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
     let mut api_md = Self {
       modules: HashMap::new(),
       idx_map: HashMap::new(),
@@ -64,7 +107,77 @@ impl Metadata {
     decode_meta(&md.modules)?
       .iter()
       .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
-        let m = ModuleMetadata::from_meta(m, lookup)?;
+        let m = ModuleMetadata::from_v12_meta(m, lookup)?;
+        let name = m.name.clone();
+        mod_events.insert_at(m.index, &name, m.event_ref.clone());
+        mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        api_md.idx_map.insert(m.index, name.clone());
+        api_md.modules.insert(name, m);
+        Ok(())
+      })?;
+
+    let raw_event_ref = lookup.insert_meta("RawEvent", TypeMeta::Enum(mod_events));
+    lookup.insert("Event", raw_event_ref);
+    let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
+    lookup.insert("DispatchErrorModule", raw_error_ref);
+
+    Ok(api_md)
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_metadata(
+    md: frame_metadata::v13::RuntimeMetadataV13,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mut api_md = Self {
+      modules: HashMap::new(),
+      idx_map: HashMap::new(),
+    };
+
+    // Top-level event/error types.
+    let mut mod_events = EnumVariants::new();
+    let mut mod_errors = EnumVariants::new();
+
+    // Decode module metadata.
+    decode_meta(&md.modules)?
+      .iter()
+      .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
+        let m = ModuleMetadata::from_v13_meta(m, lookup)?;
+        let name = m.name.clone();
+        mod_events.insert_at(m.index, &name, m.event_ref.clone());
+        mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        api_md.idx_map.insert(m.index, name.clone());
+        api_md.modules.insert(name, m);
+        Ok(())
+      })?;
+
+    let raw_event_ref = lookup.insert_meta("RawEvent", TypeMeta::Enum(mod_events));
+    lookup.insert("Event", raw_event_ref);
+    let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
+    lookup.insert("DispatchErrorModule", raw_error_ref);
+
+    Ok(api_md)
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_metadata(
+    md: frame_metadata::v14::RuntimeMetadataV14,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mut api_md = Self {
+      modules: HashMap::new(),
+      idx_map: HashMap::new(),
+    };
+
+    // Top-level event/error types.
+    let mut mod_events = EnumVariants::new();
+    let mut mod_errors = EnumVariants::new();
+
+    // Decode module metadata.
+    md.pallets
+      .iter()
+      .try_for_each(|m| -> Result<(), Box<EvalAltResult>> {
+        let m = ModuleMetadata::from_v14_meta(m, &md.types, lookup)?;
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
         mod_errors.insert_at(m.index, &name, m.error_ref.clone());
@@ -150,8 +263,9 @@ pub struct ModuleMetadata {
 }
 
 impl ModuleMetadata {
-  fn from_meta(
-    md: &frame_metadata::ModuleMetadata,
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
+    md: &frame_metadata::v12::ModuleMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let mod_idx = md.index;
@@ -174,7 +288,7 @@ impl ModuleMetadata {
     if let Some(calls) = &md.calls {
       decode_meta(calls)?.iter().enumerate().try_for_each(
         |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let func = FuncMetadata::from_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
+          let func = FuncMetadata::from_v12_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
           let name = func.name.clone();
           module.funcs.insert(name, func);
           Ok(())
@@ -189,7 +303,7 @@ impl ModuleMetadata {
       decode_meta(&md.entries)?
         .iter()
         .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-          let storage = StorageMetadata::from_meta(mod_prefix, md, lookup)?;
+          let storage = StorageMetadata::from_v12_meta(mod_prefix, md, lookup)?;
           let name = storage.name.clone();
           module.storage.insert(name, storage);
           Ok(())
@@ -205,7 +319,7 @@ impl ModuleMetadata {
       decode_meta(events)?.iter().enumerate().try_for_each(
         |(event_idx, md)| -> Result<(), Box<EvalAltResult>> {
           let (event, ty_ref) =
-            EventMetadata::from_meta(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
+            EventMetadata::from_v12_meta(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
           let name = event.name.clone();
           raw_events.insert_at(event.event_idx, &name, ty_ref);
           module.events.insert(name, event);
@@ -221,9 +335,8 @@ impl ModuleMetadata {
     // Decode module constants.
     decode_meta(&md.constants)?
       .iter()
-      .enumerate()
-      .try_for_each(|(const_idx, md)| -> Result<(), Box<EvalAltResult>> {
-        let constant = ConstMetadata::from_meta(&mod_name, mod_idx, const_idx as u8, md, lookup)?;
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let constant = ConstMetadata::from_v12_meta(&mod_name, md, lookup)?;
         let name = constant.name.clone();
         module.constants.insert(name, constant);
         Ok(())
@@ -235,7 +348,7 @@ impl ModuleMetadata {
 
     decode_meta(&md.errors)?.iter().enumerate().try_for_each(
       |(error_idx, md)| -> Result<(), Box<EvalAltResult>> {
-        let error = ErrorMetadata::from_meta(&mod_name, mod_idx, error_idx as u8, md)?;
+        let error = ErrorMetadata::from_v12_meta(&mod_name, mod_idx, error_idx as u8, md)?;
         let name = error.name.clone();
         raw_errors.insert_at(error.error_idx, &name, None);
         module.err_idx_map.insert(error.error_idx, name.clone());
@@ -247,6 +360,238 @@ impl ModuleMetadata {
       &format!("{}::RawError", mod_name),
       TypeMeta::Enum(raw_errors),
     ));
+
+    Ok(module)
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    md: &frame_metadata::v13::ModuleMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mod_idx = md.index;
+    let mod_name = decode_meta(&md.name)?;
+    let mut module = Self {
+      name: mod_name.clone(),
+      index: mod_idx,
+      storage_prefix: "".into(),
+      storage: HashMap::new(),
+      funcs: HashMap::new(),
+      events: HashMap::new(),
+      constants: HashMap::new(),
+      errors: HashMap::new(),
+      err_idx_map: HashMap::new(),
+      event_ref: None,
+      error_ref: None,
+    };
+
+    // Decode module functions.
+    if let Some(calls) = &md.calls {
+      decode_meta(calls)?.iter().enumerate().try_for_each(
+        |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
+          let func = FuncMetadata::from_v13_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
+          let name = func.name.clone();
+          module.funcs.insert(name, func);
+          Ok(())
+        },
+      )?;
+    }
+
+    // Decode module storage.
+    if let Some(storage) = &md.storage {
+      let md = decode_meta(storage)?;
+      let mod_prefix = decode_meta(&md.prefix)?;
+      decode_meta(&md.entries)?
+        .iter()
+        .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+          let storage = StorageMetadata::from_v13_meta(mod_prefix, md, lookup)?;
+          let name = storage.name.clone();
+          module.storage.insert(name, storage);
+          Ok(())
+        })?;
+      module.storage_prefix = mod_prefix.into();
+    }
+
+    // Decode module events.
+    if let Some(events) = &md.event {
+      // Module RawEvent type.
+      let mut raw_events = EnumVariants::new();
+
+      decode_meta(events)?.iter().enumerate().try_for_each(
+        |(event_idx, md)| -> Result<(), Box<EvalAltResult>> {
+          let (event, ty_ref) =
+            EventMetadata::from_v13_meta(&mod_name, mod_idx, event_idx as u8, md, lookup)?;
+          let name = event.name.clone();
+          raw_events.insert_at(event.event_idx, &name, ty_ref);
+          module.events.insert(name, event);
+          Ok(())
+        },
+      )?;
+      module.event_ref = Some(lookup.insert_meta(
+        &format!("{}::RawEvent", mod_name),
+        TypeMeta::Enum(raw_events),
+      ));
+    }
+
+    // Decode module constants.
+    decode_meta(&md.constants)?
+      .iter()
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let constant = ConstMetadata::from_v13_meta(&mod_name, md, lookup)?;
+        let name = constant.name.clone();
+        module.constants.insert(name, constant);
+        Ok(())
+      })?;
+
+    // Decode module errors.
+    // Module RawError type.
+    let mut raw_errors = EnumVariants::new();
+
+    decode_meta(&md.errors)?.iter().enumerate().try_for_each(
+      |(error_idx, md)| -> Result<(), Box<EvalAltResult>> {
+        let error = ErrorMetadata::from_v13_meta(&mod_name, mod_idx, error_idx as u8, md)?;
+        let name = error.name.clone();
+        raw_errors.insert_at(error.error_idx, &name, None);
+        module.err_idx_map.insert(error.error_idx, name.clone());
+        module.errors.insert(name, error);
+        Ok(())
+      },
+    )?;
+    module.error_ref = Some(lookup.insert_meta(
+      &format!("{}::RawError", mod_name),
+      TypeMeta::Enum(raw_errors),
+    ));
+
+    Ok(module)
+  }
+
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    md: &frame_metadata::v14::PalletMetadata<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mod_idx = md.index;
+    let mod_name = &md.name;
+    let mut module = Self {
+      name: mod_name.clone(),
+      index: mod_idx,
+      storage_prefix: "".into(),
+      storage: HashMap::new(),
+      funcs: HashMap::new(),
+      events: HashMap::new(),
+      constants: HashMap::new(),
+      errors: HashMap::new(),
+      err_idx_map: HashMap::new(),
+      event_ref: None,
+      error_ref: None,
+    };
+
+    // Decode module functions.
+    if let Some(calls) = &md.calls {
+      let call_ty = types.resolve(calls.ty.id())
+        .expect("Missing Pallet call type");
+      match call_ty.type_def() {
+        TypeDef::Variant(v) => {
+          v.variants().iter().try_for_each(
+            |md| -> Result<(), Box<EvalAltResult>> {
+              let func = FuncMetadata::from_v14_meta(&mod_name, mod_idx, md, types, lookup)?;
+              let name = func.name.clone();
+              module.funcs.insert(name, func);
+              Ok(())
+            },
+          )?;
+        }
+        _ => {
+          unimplemented!("Only Variant type supported for Pallet Call type.");
+        }
+      }
+    }
+
+    // Decode module storage.
+    if let Some(storage) = &md.storage {
+      let mod_prefix = &storage.prefix;
+      storage.entries
+        .iter()
+        .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+          let storage = StorageMetadata::from_v14_meta(mod_prefix, md, types, lookup)?;
+          let name = storage.name.clone();
+          module.storage.insert(name, storage);
+          Ok(())
+        })?;
+      module.storage_prefix = mod_prefix.into();
+    }
+
+    // Decode module events.
+    if let Some(events) = &md.event {
+      // Module RawEvent type.
+      let mut raw_events = EnumVariants::new();
+
+      let event_ty = types.resolve(events.ty.id())
+        .expect("Missing Pallet event type");
+      match event_ty.type_def() {
+        TypeDef::Variant(v) => {
+          v.variants().iter().try_for_each(
+            |md| -> Result<(), Box<EvalAltResult>> {
+              let (event, ty_ref) =
+                EventMetadata::from_v14_meta(&mod_name, mod_idx, md, types, lookup)?;
+              let name = event.name.clone();
+              raw_events.insert_at(event.event_idx, &name, ty_ref);
+              module.events.insert(name, event);
+              Ok(())
+            },
+          )?;
+        }
+        _ => {
+          unimplemented!("Only Variant type supported for Pallet Event type.");
+        }
+      }
+      module.event_ref = Some(lookup.insert_meta(
+        &format!("{}::RawEvent", mod_name),
+        TypeMeta::Enum(raw_events),
+      ));
+    }
+
+    // Decode module constants.
+    md.constants
+      .iter()
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let constant = ConstMetadata::from_v14_meta(&mod_name, md, types, lookup)?;
+        let name = constant.name.clone();
+        module.constants.insert(name, constant);
+        Ok(())
+      })?;
+
+    // Decode module errors.
+    if let Some(error) = &md.error {
+      // Module RawError type.
+      let mut raw_errors = EnumVariants::new();
+
+      let error_ty = types.resolve(error.ty.id())
+        .expect("Missing Pallet error type");
+      match error_ty.type_def() {
+        TypeDef::Variant(v) => {
+          v.variants().iter().try_for_each(
+            |md| -> Result<(), Box<EvalAltResult>> {
+              let error = ErrorMetadata::from_v14_meta(&mod_name, mod_idx, md)?;
+              let name = error.name.clone();
+              raw_errors.insert_at(error.error_idx, &name, None);
+              module.err_idx_map.insert(error.error_idx, name.clone());
+              module.errors.insert(name, error);
+              Ok(())
+            },
+          )?;
+        }
+        _ => {
+          unimplemented!("Only Variant type supported for Pallet Error type.");
+        }
+      }
+      module.error_ref = Some(lookup.insert_meta(
+        &format!("{}::RawError", mod_name),
+        TypeMeta::Enum(raw_errors),
+      ));
+    }
 
     Ok(module)
   }
@@ -337,9 +682,91 @@ pub struct NamedType {
   ty_meta: TypeRef,
 }
 
+#[cfg(feature = "v14")]
+fn get_type_name(ty: &Type<PortableForm>, types: &PortableRegistry) -> String {
+  let name = match ty.type_def() {
+    TypeDef::Sequence(s) => {
+      let elm_ty = types.resolve(s.type_param().id())
+        .expect("Failed to resolve sequence element type");
+      format!("Vec<{}>", get_type_name(elm_ty, types))
+    }
+    TypeDef::Array(a) => {
+      let elm_ty = types.resolve(a.type_param().id())
+        .expect("Failed to resolve array element type");
+      format!("[{}; {}]", get_type_name(elm_ty, types), a.len())
+    }
+    TypeDef::Tuple(t) => {
+      let fields = t.fields().iter().map(|f| {
+        let f_ty = types.resolve(f.id())
+          .expect("Failed to resolve tuple element type");
+        get_type_name(f_ty, types)
+      }).collect::<Vec<_>>();
+      format!("({})", fields.join(","))
+    }
+    TypeDef::Primitive(p) => {
+      use TypeDefPrimitive::*;
+      match p {
+        Bool => "bool".into(),
+        Char => "char".into(),
+        Str => "Text".into(),
+        U8 => "u8".into(),
+        U16 => "u16".into(),
+        U32 => "u32".into(),
+        U64 => "u64".into(),
+        U128 => "u128".into(),
+        U256 => "u256".into(),
+        I8 => "i8".into(),
+        I16 => "i16".into(),
+        I32 => "i32".into(),
+        I64 => "i64".into(),
+        I128 => "i128".into(),
+        I256 => "i256".into(),
+      }
+    }
+    TypeDef::Compact(c) => {
+      let elm_ty = types.resolve(c.type_param().id())
+        .expect("Failed to resolve Compact type");
+      format!("Compact<{}>", get_type_name(elm_ty, types))
+    }
+    _ => {
+      ty.path().ident().expect("Missing type name")
+    }
+  };
+  let ty_params = ty.type_params();
+  if ty_params.len() > 0 {
+    let params = ty_params.iter().map(|p| {
+      match p.ty() {
+        Some(ty) => {
+          let p_ty = types.resolve(ty.id())
+            .expect("Failed to resolve type parameter");
+          get_type_name(p_ty, types)
+        }
+        None => p.name().clone()
+      }
+    }).collect::<Vec<_>>();
+    format!("{}<{}>", name, params.join(","))
+  } else {
+    name
+  }
+}
+
 impl NamedType {
   pub fn new(name: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let ty_meta = lookup.parse_type(name)?;
+    let named = Self {
+      name: name.into(),
+      ty_meta,
+    };
+
+    Ok(named)
+  }
+
+  #[cfg(feature = "v14")]
+  pub fn new_type(ty_id: u32, types: &PortableRegistry, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
+    let ty = types.resolve(ty_id)
+      .ok_or_else(|| format!("Failed to resolve type."))?;
+    let name = get_type_name(ty, types);
+    let ty_meta = lookup.parse_type(&name)?;
     let named = Self {
       name: name.into(),
       ty_meta,
@@ -379,9 +806,68 @@ impl NamedType {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum KeyHasherType {
+	Blake2_128,
+	Blake2_256,
+	Blake2_128Concat,
+	Twox128,
+	Twox256,
+	Twox64Concat,
+	Identity,
+}
+
+#[cfg(feature = "v12")]
+impl From<&frame_metadata::v12::StorageHasher> for KeyHasherType {
+  fn from(hasher: &frame_metadata::v12::StorageHasher) -> Self {
+    use frame_metadata::v12::StorageHasher;
+    match hasher {
+      StorageHasher::Blake2_128 => Self::Blake2_128,
+      StorageHasher::Blake2_256 => Self::Blake2_256,
+      StorageHasher::Blake2_128Concat => Self::Blake2_128Concat,
+      StorageHasher::Twox128 => Self::Twox128,
+      StorageHasher::Twox256 => Self::Twox256,
+      StorageHasher::Twox64Concat => Self::Twox64Concat,
+      StorageHasher::Identity => Self::Identity,
+    }
+  }
+}
+
+#[cfg(feature = "v13")]
+impl From<&frame_metadata::v13::StorageHasher> for KeyHasherType {
+  fn from(hasher: &frame_metadata::v13::StorageHasher) -> Self {
+    use frame_metadata::v13::StorageHasher;
+    match hasher {
+      StorageHasher::Blake2_128 => Self::Blake2_128,
+      StorageHasher::Blake2_256 => Self::Blake2_256,
+      StorageHasher::Blake2_128Concat => Self::Blake2_128Concat,
+      StorageHasher::Twox128 => Self::Twox128,
+      StorageHasher::Twox256 => Self::Twox256,
+      StorageHasher::Twox64Concat => Self::Twox64Concat,
+      StorageHasher::Identity => Self::Identity,
+    }
+  }
+}
+
+#[cfg(feature = "v14")]
+impl From<&frame_metadata::v14::StorageHasher> for KeyHasherType {
+  fn from(hasher: &frame_metadata::v14::StorageHasher) -> Self {
+    use frame_metadata::v14::StorageHasher;
+    match hasher {
+      StorageHasher::Blake2_128 => Self::Blake2_128,
+      StorageHasher::Blake2_256 => Self::Blake2_256,
+      StorageHasher::Blake2_128Concat => Self::Blake2_128Concat,
+      StorageHasher::Twox128 => Self::Twox128,
+      StorageHasher::Twox256 => Self::Twox256,
+      StorageHasher::Twox64Concat => Self::Twox64Concat,
+      StorageHasher::Identity => Self::Identity,
+    }
+  }
+}
+
 #[derive(Debug, Clone)]
 pub struct KeyHasher {
-  pub type_hashers: Vec<(NamedType, StorageHasher)>,
+  pub type_hashers: Vec<(NamedType, KeyHasherType)>,
 }
 
 impl KeyHasher {
@@ -438,25 +924,25 @@ impl KeyHasher {
   ) -> Result<(), Box<EvalAltResult>> {
     let (_, hasher) = &self.type_hashers[idx];
     match hasher {
-      StorageHasher::Blake2_128 => {
+      KeyHasherType::Blake2_128 => {
         buf.extend(Blake2_128::hash(&key));
       }
-      StorageHasher::Blake2_256 => {
+      KeyHasherType::Blake2_256 => {
         buf.extend(Blake2_256::hash(&key));
       }
-      StorageHasher::Blake2_128Concat => {
+      KeyHasherType::Blake2_128Concat => {
         buf.extend(Blake2_128Concat::hash(&key));
       }
-      StorageHasher::Twox128 => {
+      KeyHasherType::Twox128 => {
         buf.extend(Twox128::hash(&key));
       }
-      StorageHasher::Twox256 => {
+      KeyHasherType::Twox256 => {
         buf.extend(Twox256::hash(&key));
       }
-      StorageHasher::Twox64Concat => {
+      KeyHasherType::Twox64Concat => {
         buf.extend(Twox64Concat::hash(&key));
       }
-      StorageHasher::Identity => {
+      KeyHasherType::Identity => {
         buf.extend(&key);
       }
     }
@@ -568,11 +1054,13 @@ pub struct StorageMetadata {
 }
 
 impl StorageMetadata {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     prefix: &str,
-    md: &frame_metadata::StorageEntryMetadata,
+    md: &frame_metadata::v12::StorageEntryMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
+    use frame_metadata::v12::StorageEntryType;
     let (key_hasher, value) = match &md.ty {
       StorageEntryType::Plain(value) => (None, value.clone()),
       StorageEntryType::Map {
@@ -580,7 +1068,7 @@ impl StorageMetadata {
       } => {
         let ty = NamedType::new(decode_meta(key)?, lookup)?;
         let hasher = KeyHasher {
-          type_hashers: vec![(ty, hasher.clone())],
+          type_hashers: vec![(ty, hasher.into())],
         };
         (Some(hasher), value.clone())
       }
@@ -594,7 +1082,7 @@ impl StorageMetadata {
         let ty1 = NamedType::new(decode_meta(key1)?, lookup)?;
         let ty2 = NamedType::new(decode_meta(key2)?, lookup)?;
         let hasher = KeyHasher {
-          type_hashers: vec![(ty1, hasher.clone()), (ty2, key2_hasher.clone())],
+          type_hashers: vec![(ty1, hasher.into()), (ty2, key2_hasher.into())],
         };
         (Some(hasher), value.clone())
       }
@@ -604,7 +1092,108 @@ impl StorageMetadata {
       name: decode_meta(&md.name)?.clone(),
       key_hasher,
       value_ty: NamedType::new(decode_meta(&value)?, lookup)?,
-      docs: Docs::from_meta(&md.documentation)?,
+      docs: Docs::from_v12_meta(&md.documentation)?,
+    };
+
+    Ok(storage)
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    prefix: &str,
+    md: &frame_metadata::v13::StorageEntryMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    use frame_metadata::v13::StorageEntryType;
+    let (key_hasher, value) = match &md.ty {
+      StorageEntryType::Plain(value) => (None, value.clone()),
+      StorageEntryType::Map {
+        hasher, key, value, ..
+      } => {
+        let ty = NamedType::new(decode_meta(key)?, lookup)?;
+        let hasher = KeyHasher {
+          type_hashers: vec![(ty, hasher.into())],
+        };
+        (Some(hasher), value.clone())
+      }
+      StorageEntryType::DoubleMap {
+        hasher,
+        key1,
+        key2_hasher,
+        key2,
+        value,
+      } => {
+        let ty1 = NamedType::new(decode_meta(key1)?, lookup)?;
+        let ty2 = NamedType::new(decode_meta(key2)?, lookup)?;
+        let hasher = KeyHasher {
+          type_hashers: vec![(ty1, hasher.into()), (ty2, key2_hasher.into())],
+        };
+        (Some(hasher), value.clone())
+      }
+      StorageEntryType::NMap { hashers, keys, value } => {
+        let type_hashers = decode_meta(keys)?.iter()
+          .zip(decode_meta(hashers)?.iter())
+          .map(|(key, hasher)| {
+            let ty = NamedType::new(key, lookup)?;
+            Ok((ty, hasher.into()))
+          })
+          .collect::<Result<Vec<_>, Box<EvalAltResult>>>()?;
+        let hasher = KeyHasher {
+          type_hashers,
+        };
+        (Some(hasher), value.clone())
+      }
+    };
+    let storage = Self {
+      prefix: prefix.into(),
+      name: decode_meta(&md.name)?.clone(),
+      key_hasher,
+      value_ty: NamedType::new(decode_meta(&value)?, lookup)?,
+      docs: Docs::from_v13_meta(&md.documentation)?,
+    };
+
+    Ok(storage)
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    prefix: &str,
+    md: &frame_metadata::v14::StorageEntryMetadata<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    use frame_metadata::v14::StorageEntryType;
+    let (key_hasher, value) = match &md.ty {
+      StorageEntryType::Plain(value) => (None, value.clone()),
+      StorageEntryType::Map {
+        hashers, key, value, ..
+      } => {
+        match hashers.as_slice() {
+          [hasher] => {
+            let ty = NamedType::new_type(key.id(), types, lookup)?;
+            let hasher = KeyHasher {
+              type_hashers: vec![(ty, hasher.into())],
+            };
+            (Some(hasher), value.clone())
+          }
+          hashers => {
+            let ty = NamedType::new_type(key.id(), types, lookup)?;
+            let hasher = KeyHasher {
+              type_hashers: hashers.iter()
+                .map(|hasher| (ty.clone(), hasher.into())).collect(),
+            };
+            (Some(hasher), value.clone())
+          }
+        }
+      }
+    };
+    let storage = Self {
+      prefix: prefix.into(),
+      name: md.name.to_string(),
+      key_hasher,
+      //value_ty: NamedType::new(decode_meta(&value)?, lookup)?,
+      value_ty: NamedType::new_type(value.id(), types, lookup)?,
+      docs: Docs::from_v14_meta(md.docs.as_slice()),
     };
 
     Ok(storage)
@@ -755,11 +1344,12 @@ pub struct EventMetadata {
 }
 
 impl EventMetadata {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     mod_name: &str,
     _mod_idx: u8,
     event_idx: u8,
-    md: &frame_metadata::EventMetadata,
+    md: &frame_metadata::v12::EventMetadata,
     lookup: &TypeLookup,
   ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut event = Self {
@@ -767,7 +1357,7 @@ impl EventMetadata {
       name: decode_meta(&md.name)?.clone(),
       event_idx,
       args: Vec::new(),
-      docs: Docs::from_meta(&md.documentation)?,
+      docs: Docs::from_v12_meta(&md.documentation)?,
     };
 
     let mut event_tuple = Vec::new();
@@ -777,6 +1367,82 @@ impl EventMetadata {
       .iter()
       .try_for_each(|name| -> Result<(), Box<EvalAltResult>> {
         let arg = NamedType::new(name, lookup)?;
+        event_tuple.push(arg.ty_meta.clone());
+        event.args.push(arg);
+        Ok(())
+      })?;
+
+    let event_ref = if event_tuple.len() > 0 {
+      let type_name = format!("{}::RawEvent::{}", mod_name, event.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(event_tuple)))
+    } else {
+      None
+    };
+
+    Ok((event, event_ref))
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    mod_name: &str,
+    _mod_idx: u8,
+    event_idx: u8,
+    md: &frame_metadata::v13::EventMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
+    let mut event = Self {
+      mod_name: mod_name.into(),
+      name: decode_meta(&md.name)?.clone(),
+      event_idx,
+      args: Vec::new(),
+      docs: Docs::from_v13_meta(&md.documentation)?,
+    };
+
+    let mut event_tuple = Vec::new();
+
+    // Decode event arguments.
+    decode_meta(&md.arguments)?
+      .iter()
+      .try_for_each(|name| -> Result<(), Box<EvalAltResult>> {
+        let arg = NamedType::new(name, lookup)?;
+        event_tuple.push(arg.ty_meta.clone());
+        event.args.push(arg);
+        Ok(())
+      })?;
+
+    let event_ref = if event_tuple.len() > 0 {
+      let type_name = format!("{}::RawEvent::{}", mod_name, event.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(event_tuple)))
+    } else {
+      None
+    };
+
+    Ok((event, event_ref))
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    mod_name: &str,
+    _mod_idx: u8,
+    md: &Variant<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
+    let mut event = Self {
+      mod_name: mod_name.into(),
+      name: md.name().clone(),
+      event_idx: md.index(),
+      args: Vec::new(),
+      docs: Docs::from_v14_meta(&md.docs()),
+    };
+
+    let mut event_tuple = Vec::new();
+
+    // Decode event arguments.
+    md.fields()
+      .iter()
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let arg = NamedType::new_type(md.ty().id(), types, lookup)?;
         event_tuple.push(arg.ty_meta.clone());
         event.args.push(arg);
         Ok(())
@@ -829,11 +1495,10 @@ pub struct ConstMetadata {
 }
 
 impl ConstMetadata {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     mod_name: &str,
-    _mod_idx: u8,
-    _const_idx: u8,
-    md: &frame_metadata::ModuleConstantMetadata,
+    md: &frame_metadata::v12::ModuleConstantMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let ty = decode_meta(&md.ty)?;
@@ -842,7 +1507,39 @@ impl ConstMetadata {
       mod_name: mod_name.into(),
       name: decode_meta(&md.name)?.clone(),
       const_ty,
-      docs: Docs::from_meta(&md.documentation)?,
+      docs: Docs::from_v12_meta(&md.documentation)?,
+    })
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    mod_name: &str,
+    md: &frame_metadata::v13::ModuleConstantMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let ty = decode_meta(&md.ty)?;
+    let const_ty = NamedType::new(ty, lookup)?;
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: decode_meta(&md.name)?.clone(),
+      const_ty,
+      docs: Docs::from_v13_meta(&md.documentation)?,
+    })
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    mod_name: &str,
+    md: &frame_metadata::v14::PalletConstantMetadata<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let const_ty = NamedType::new_type(md.ty.id(), types, lookup)?;
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: md.name.clone(),
+      const_ty,
+      docs: Docs::from_v14_meta(&md.docs),
     })
   }
 
@@ -873,17 +1570,47 @@ pub struct ErrorMetadata {
 }
 
 impl ErrorMetadata {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     mod_name: &str,
     _mod_idx: u8,
     error_idx: u8,
-    md: &frame_metadata::ErrorMetadata,
+    md: &frame_metadata::v12::ErrorMetadata,
   ) -> Result<Self, Box<EvalAltResult>> {
     Ok(Self {
       mod_name: mod_name.into(),
       name: decode_meta(&md.name)?.clone(),
       error_idx,
-      docs: Docs::from_meta(&md.documentation)?,
+      docs: Docs::from_v12_meta(&md.documentation)?,
+    })
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    mod_name: &str,
+    _mod_idx: u8,
+    error_idx: u8,
+    md: &frame_metadata::v13::ErrorMetadata,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: decode_meta(&md.name)?.clone(),
+      error_idx,
+      docs: Docs::from_v13_meta(&md.documentation)?,
+    })
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    mod_name: &str,
+    _mod_idx: u8,
+    md: &Variant<PortableForm>,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    Ok(Self {
+      mod_name: mod_name.into(),
+      name: md.name().clone(),
+      error_idx: md.index(),
+      docs: Docs::from_v14_meta(&md.docs()),
     })
   }
 
@@ -1004,11 +1731,12 @@ pub struct FuncMetadata {
 }
 
 impl FuncMetadata {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     mod_name: &str,
     mod_idx: u8,
     func_idx: u8,
-    md: &FunctionMetadata,
+    md: &frame_metadata::v12::FunctionMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let mut func = Self {
@@ -1017,14 +1745,72 @@ impl FuncMetadata {
       mod_idx,
       func_idx,
       args: Vec::new(),
-      docs: Docs::from_meta(&md.documentation)?,
+      docs: Docs::from_v12_meta(&md.documentation)?,
     };
 
     // Decode function arguments.
     decode_meta(&md.arguments)?
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-        let arg = FuncArg::from_meta(md, lookup)?;
+        let arg = FuncArg::from_v12_meta(md, lookup)?;
+        func.args.push(arg);
+        Ok(())
+      })?;
+
+    Ok(func)
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    mod_name: &str,
+    mod_idx: u8,
+    func_idx: u8,
+    md: &frame_metadata::v13::FunctionMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mut func = Self {
+      mod_name: mod_name.into(),
+      name: decode_meta(&md.name)?.clone(),
+      mod_idx,
+      func_idx,
+      args: Vec::new(),
+      docs: Docs::from_v13_meta(&md.documentation)?,
+    };
+
+    // Decode function arguments.
+    decode_meta(&md.arguments)?
+      .iter()
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let arg = FuncArg::from_v13_meta(md, lookup)?;
+        func.args.push(arg);
+        Ok(())
+      })?;
+
+    Ok(func)
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    mod_name: &str,
+    mod_idx: u8,
+    md: &Variant<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let mut func = Self {
+      mod_name: mod_name.into(),
+      name: md.name().clone(),
+      mod_idx,
+      func_idx: md.index(),
+      args: Vec::new(),
+      docs: Docs::from_v14_meta(&md.docs()),
+    };
+
+    // Decode function arguments.
+    md.fields()
+      .iter()
+      .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
+        let arg = FuncArg::from_v14_meta(md, types, lookup)?;
         func.args.push(arg);
         Ok(())
       })?;
@@ -1116,13 +1902,41 @@ pub struct FuncArg {
 }
 
 impl FuncArg {
-  fn from_meta(
-    md: &FunctionArgumentMetadata,
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
+    md: &frame_metadata::v12::FunctionArgumentMetadata,
     lookup: &TypeLookup,
   ) -> Result<Self, Box<EvalAltResult>> {
     let arg = Self {
       name: decode_meta(&md.name)?.clone(),
       ty: NamedType::new(decode_meta(&md.ty)?, lookup)?,
+    };
+
+    Ok(arg)
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    md: &frame_metadata::v13::FunctionArgumentMetadata,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let arg = Self {
+      name: decode_meta(&md.name)?.clone(),
+      ty: NamedType::new(decode_meta(&md.ty)?, lookup)?,
+    };
+
+    Ok(arg)
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    md: &Field<PortableForm>,
+    types: &PortableRegistry,
+    lookup: &TypeLookup,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    let arg = Self {
+      name: md.name().cloned().unwrap_or_default(),
+      ty: NamedType::new_type(md.ty().id(), types, lookup)?,
     };
 
     Ok(arg)
@@ -1155,12 +1969,31 @@ pub struct Docs {
 }
 
 impl Docs {
-  fn from_meta(
+  #[cfg(feature = "v12")]
+  fn from_v12_meta(
     md: &DecodeDifferentArray<&'static str, String>,
   ) -> Result<Self, Box<EvalAltResult>> {
     Ok(Self {
       lines: decode_meta(md)?.clone(),
     })
+  }
+
+  #[cfg(feature = "v13")]
+  fn from_v13_meta(
+    md: &DecodeDifferentArray<&'static str, String>,
+  ) -> Result<Self, Box<EvalAltResult>> {
+    Ok(Self {
+      lines: decode_meta(md)?.clone(),
+    })
+  }
+
+  #[cfg(feature = "v14")]
+  fn from_v14_meta(
+    docs: &[String],
+  ) -> Self {
+    Self {
+      lines: docs.to_vec(),
+    }
   }
 
   pub fn title(&mut self) -> String {

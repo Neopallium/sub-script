@@ -29,8 +29,10 @@ sp-version = "3.0"
 sp-keyring = "3.0"
 sp-runtime = "3.0"
 frame-support = "3.0"
-frame-metadata = { version = "13.0.0", default-features = false }
+frame-metadata = { version = "14.0.0", default-features = false, features = ["std"] }
 parity-scale-codec = "2.3.1"
+
+scale-info = { version = "1.0", default-features = false, optional = true }
 
 # rhai
 rhai = { version = "1.2", default-features = false, features = ["sync", "only_i64", "no_float", "decimal", "serde", "metadata"]}
@@ -51,7 +53,11 @@ cryptography_core = { git = "https://github.com/PolymathNetwork/cryptography.git
 polymesh-primitives = { git = "https://github.com/PolymathNetwork/Polymesh", branch = "develop", default-features = false, optional = true }
 
 [features]
-default = [ "std", "polymesh" ]
+default = [ "std", "polymesh", "v12", "v13", "v14" ]
+
+v12 = ["frame-metadata/v12"]
+v13 = ["frame-metadata/v13"]
+v14 = ["frame-metadata/v14", "scale-info"]
 
 # Backends
 u64_backend = [ "confidential_identity_v1/u64_backend", "cryptography_core/u64_backend"]

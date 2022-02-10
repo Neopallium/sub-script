@@ -19,6 +19,7 @@
 		"_enum": ["V1", "V2"]
 	},
   "AccountId": "[u8; 32]",
+  "AccountId32": "AccountId",
   "AccountIndex": "u32",
   "Weight": "u64",
   "Percent": "u8",
