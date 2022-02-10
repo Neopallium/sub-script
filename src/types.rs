@@ -937,11 +937,22 @@ impl Types {
         }
       }
       Some(')') => {
+        let mut broken_type = None;
         let defs = def
           .trim_matches(|c| c == '(' || c == ')')
           .split_terminator(',')
           .filter_map(|s| {
-            let s = s.trim();
+            let s = match broken_type.take() {
+              Some(s1) => format!("{}, {}", s1, s),
+              None => s.to_string(),
+            }.trim().to_string();
+            // Check for broken type.
+            let left = s.chars().filter(|c| *c == '<').count();
+            let right = s.chars().filter(|c| *c == '>').count();
+            if left != right {
+              broken_type = Some(s);
+              return None;
+            }
             if s != "" {
               Some(s)
             } else {
@@ -951,7 +962,7 @@ impl Types {
           .try_fold(
             Vec::new(),
             |mut vec, val| -> Result<_, Box<EvalAltResult>> {
-              let type_ref = self.parse_type(val)?;
+              let type_ref = self.parse_type(&val)?;
               vec.push(type_ref);
               Ok(vec)
             },
