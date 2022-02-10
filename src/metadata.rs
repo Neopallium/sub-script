@@ -683,6 +683,14 @@ pub struct NamedType {
 }
 
 #[cfg(feature = "v14")]
+fn is_type_compact(ty: &Type<PortableForm>) -> bool {
+  match ty.type_def() {
+    TypeDef::Compact(_) => true,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "v14")]
 fn get_type_name(ty: &Type<PortableForm>, types: &PortableRegistry) -> String {
   let name = match ty.type_def() {
     TypeDef::Sequence(s) => {
@@ -766,6 +774,29 @@ impl NamedType {
     let ty = types.resolve(ty_id)
       .ok_or_else(|| format!("Failed to resolve type."))?;
     let name = get_type_name(ty, types);
+    let ty_meta = lookup.parse_type(&name)?;
+    let named = Self {
+      name: name.into(),
+      ty_meta,
+    };
+
+    Ok(named)
+  }
+
+  #[cfg(feature = "v14")]
+  pub fn new_field_type(md: &Field<PortableForm>, types: &PortableRegistry, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
+    let ty = types.resolve(md.ty().id())
+      .ok_or_else(|| format!("Failed to resolve type."))?;
+    //let name = get_type_name(ty, types);
+    let name = md.type_name().map(|ty_name| {
+        if is_type_compact(ty) {
+          format!("Compact<{}>", ty_name)
+        } else {
+          ty_name.to_string()
+        }
+      }).unwrap_or_else(|| {
+        get_type_name(ty, types)
+      });
     let ty_meta = lookup.parse_type(&name)?;
     let named = Self {
       name: name.into(),
@@ -1191,7 +1222,6 @@ impl StorageMetadata {
       prefix: prefix.into(),
       name: md.name.to_string(),
       key_hasher,
-      //value_ty: NamedType::new(decode_meta(&value)?, lookup)?,
       value_ty: NamedType::new_type(value.id(), types, lookup)?,
       docs: Docs::from_v14_meta(md.docs.as_slice()),
     };
@@ -1442,7 +1472,7 @@ impl EventMetadata {
     md.fields()
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
-        let arg = NamedType::new_type(md.ty().id(), types, lookup)?;
+        let arg = NamedType::new_field_type(md, types, lookup)?;
         event_tuple.push(arg.ty_meta.clone());
         event.args.push(arg);
         Ok(())
@@ -1936,7 +1966,7 @@ impl FuncArg {
   ) -> Result<Self, Box<EvalAltResult>> {
     let arg = Self {
       name: md.name().cloned().unwrap_or_default(),
-      ty: NamedType::new_type(md.ty().id(), types, lookup)?,
+      ty: NamedType::new_field_type(md, types, lookup)?,
     };
 
     Ok(arg)
