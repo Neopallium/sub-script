@@ -36,7 +36,6 @@ use crate::users::{AccountId, User};
 pub type TxHash = H256;
 pub type BlockHash = H256;
 
-pub type SignedBlock = generic::SignedBlock<Block>;
 pub type GenericAddress = sp_runtime::MultiAddress<AccountId, ()>;
 
 pub type AdditionalSigned = (u32, u32, BlockHash, BlockHash, (), (), ());
@@ -139,6 +138,12 @@ pub enum TransactionStatus {
   Usurped(TxHash),
   Dropped,
   Invalid,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignedBlock {
+  block: Block,
+  // Ignore justifications field.
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
