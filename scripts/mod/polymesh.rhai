@@ -167,17 +167,14 @@ fn create_users(names, balance) {
 }
 
 // Create a batch of assets and issuers.
-fn create_asset_batch(prefix, offset, count, supply) {
-	print(`CreateAssets: prefix='${prefix}', range=(${offset}..${count}), supply=${supply}`);
+fn create_asset_batch(prefix, offset, count, supply, disable_iu) {
+	print(`CreateAssets: prefix='${prefix}', range=(${offset}..${count}), supply=${supply}, disable_iu=${disable_iu}`);
 	let tickers = gen_names(prefix, offset, count);
-	return create_assets(tickers, supply);
+	return create_assets(tickers, supply, disable_iu);
 }
 
 // Create assets.
-fn create_assets(tickers, supply) {
-	// Use Alice doing batch calls.
-	let alice = USER.Bob; //Alice;
-
+fn create_assets(tickers, supply, disable_iu) {
 	let ticker_to_issuer = |ticker| `Issuer_${ticker}`;
 	let issuers = create_users(tickers.map(ticker_to_issuer), 10000);
 
@@ -186,7 +183,7 @@ fn create_assets(tickers, supply) {
 		let issuer = issuers[idx];
 	
 		results += issuer.submit(Utility.batch_optimistic([
-			Asset.create_asset(`token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), false),
+			Asset.create_asset(`token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), disable_iu),
 			Asset.issue(ticker, supply),
 		]));
 	}
@@ -194,7 +191,7 @@ fn create_assets(tickers, supply) {
 	print("CreateAssets: Wait for batch results");
 	wait_for_in_block(results);
 	
-	return issuers;
+	return [issuers, tickers];
 }
 
 // Prepare `Utiltity.relay_tx` call.
