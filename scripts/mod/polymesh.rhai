@@ -168,13 +168,20 @@ fn create_users(names, balance) {
 
 // Create a batch of assets and issuers.
 fn create_asset_batch(prefix, offset, count, supply, disable_iu) {
-	print(`CreateAssets: prefix='${prefix}', range=(${offset}..${count}), supply=${supply}, disable_iu=${disable_iu}`);
+	print(`Create Assets: prefix='${prefix}', range=(${offset}..${count}), supply=${supply}, disable_iu=${disable_iu}`);
 	let tickers = gen_names(prefix, offset, count);
-	return create_assets(tickers, supply, disable_iu);
+	return create_assets(tickers, #{ EquityCommon: () }, supply, disable_iu);
+}
+
+// Create a batch of stablecoins and issuers.
+fn create_coin_batch(prefix, offset, count, supply) {
+	print(`Create Stablecoins: prefix='${prefix}', range=(${offset}..${count}), supply=${supply}`);
+	let tickers = gen_names(prefix, offset, count);
+	return create_assets(tickers, #{ StableCoin: () }, supply, true);
 }
 
 // Create assets.
-fn create_assets(tickers, supply, disable_iu) {
+fn create_assets(tickers, asset_type, supply, disable_iu) {
 	let ticker_to_issuer = |ticker| `Issuer_${ticker}`;
 	let issuers = create_users(tickers.map(ticker_to_issuer), 10000);
 
@@ -183,8 +190,9 @@ fn create_assets(tickers, supply, disable_iu) {
 		let issuer = issuers[idx];
 	
 		results += issuer.submit(Utility.batch_optimistic([
-			Asset.create_asset(`token ${ticker}`, ticker, true, #{ EquityCommon: () }, [], (), disable_iu),
+			Asset.create_asset(`token ${ticker}`, ticker, true, asset_type, [], (), disable_iu),
 			Asset.issue(ticker, supply),
+			ComplianceManager.pause_asset_compliance(ticker),
 		]));
 	}
 	// Wait for all results.
@@ -248,4 +256,72 @@ fn add_investor_uniqueness_claim(user, ticker) {
 	
 	// Add Investor Uniqueness claim.
 	return user.submit(Identity.add_investor_uniqueness_claim(user, claim[0], claim[1], ()));
+}
+
+// get a list of the user's venues.
+fn get_user_venues(user) {
+	let did = get_did(user);
+	return STORAGE.map("Settlement", "UserVenues", did);
+}
+
+fn get_or_create_venue(user, venue_type) {
+	// Get or create venue.
+	let venues = get_user_venues(user);
+	let venue_id = ();
+	if venues != () && venues.len() > 0 {
+		venue_id = venues[0];
+	} else {
+		print(`Create Venue`);
+		let res = user.submit(Settlement.create_venue("", [], venue_type));
+		for event in res.events("Settlement.VenueCreated") {
+			venue_id = event.args[1];
+		}
+	}
+	return venue_id;
+}
+
+fn asset_fund_users(ticker, from, users, amount) {
+	// Get or create venue.
+	let venue_id = get_or_create_venue(from, #{ Other: () });
+
+	// Create settlement.
+	let legs = [];
+	let from_did = get_did(from);
+	let from_portfolio = #{ did: from_did, kind: #{ Default: () } };
+	let portfolios = [];
+	for user in users {
+		let did = get_did(user);
+		let portfolio = #{ did: did, kind: #{ Default: () } };
+		legs.push(#{
+			from: from_portfolio,
+			to: portfolio,
+			asset: ticker,
+			amount: amount,
+		});
+		portfolios.push(#{ user: user, portfolio: portfolio });
+	}
+	let res = from.submit(Settlement.add_and_affirm_instruction(venue_id, #{ SettleOnAffirmation: () }, (), (), legs, [from_portfolio]));
+	let instruction_id = ();
+	for event in res.events("Settlement.InstructionCreated") {
+		instruction_id = event.args[2];
+	}
+
+	// Users affirm.
+	let results = [];
+	for port in portfolios {
+		results += port.user.submit(Settlement.affirm_instruction(instruction_id, [port.portfolio], 10));
+	}
+	wait_for_in_block(results);
+}
+
+fn sign_orderbook_order(user, order) {
+	// Encode and sign order.
+	let order_ty = Types.resolve("Order<AccountId>");
+	let encoded_order = order_ty.encode(order);
+	let sig = user.sign(encoded_order);
+
+	return #{
+		signature: sig,
+		order: order,
+	};
 }

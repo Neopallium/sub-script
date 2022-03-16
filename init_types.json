@@ -144,6 +144,13 @@
       "None": ""
     }
   },
+	"ElectionCompute": {
+    "_enum": {
+			"OnChain": "",
+			"Signed": "",
+			"Unsigned": ""
+		}
+	},
 	"FixedI64": "i64",
 	"FixedI128": "i128",
 	"FixedU128": "u128",
