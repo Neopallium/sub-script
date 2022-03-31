@@ -75,6 +75,7 @@ fn mock_user(user, balance) {
 	}
 	calls += Sudo.sudo(Balances.set_balance(user, balance, 0));
 	let res = USER.Alice.submit(Utility.batch_optimistic(calls));
+	//let res = USER.Eve.submit(Utility.batch_optimistic(calls));
 	return res.is_in_block;
 }
 
@@ -101,7 +102,12 @@ fn cdd_providers() {
 
 // Create a batch of keys.
 fn create_keys_batch(prefix, offset, count) {
-	print(`CreateKeys: prefix='${prefix}', range=(${offset}..${count})`);
+	return create_keys_batch_with_balance(prefix, offset, count, ());
+}
+
+// Create a batch of keys with balance.
+fn create_keys_batch_with_balance(prefix, offset, count, balance) {
+	print(`CreateKeys: prefix='${prefix}', range=(${offset}..${count}), balance=${balance}`);
 	let names = gen_names(prefix, offset, count);
 
 	// Generate keys.
@@ -109,6 +115,35 @@ fn create_keys_batch(prefix, offset, count) {
 	for name in names {
 		let key = USER[name];
 		keys += key;
+	}
+	if balance != () {
+		// Alice for CDD.
+		let alice = USER.Alice;
+		//let alice = USER.Eve;
+
+		// Query balances.
+		let cur_bals = get_balances(keys);
+
+		print("CreateKeys: Batch 'set_balance' calls");
+		let results = [];
+		let calls = [];
+		for (key, idx) in keys {
+			let cur_bal = cur_bals[idx];
+			if cur_bal < balance {
+				calls += Sudo.sudo(Balances.set_balance(key, balance, 0));
+			}
+			if calls.len() > 200 {
+				results += alice.submit(Utility.batch_optimistic(calls));
+				calls = [];
+			}
+		}
+
+		// Final batch if there are still calls to make.
+		if calls.len() > 0 {
+			results += alice.submit(Utility.batch_optimistic(calls));
+		}
+		print("CreateKeys: Wait for batch 'set_balance' results");
+		wait_for_in_block(results);
 	}
 	return keys;
 }
@@ -125,6 +160,7 @@ fn create_users(names, balance) {
 	let users = [];
 	// Alice for CDD.
 	let alice = USER.Alice;
+	//let alice = USER.Eve;
 	
 	// Generate users.
 	for name in names {
