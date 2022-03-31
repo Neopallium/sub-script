@@ -203,6 +203,19 @@ pub fn init_engine(
       Ok(())
     },
   )?;
+  lookup.custom_encode(
+    "H512",
+    TypeId::of::<MultiSignature>(),
+    |value, data| {
+      let sig = value.cast::<MultiSignature>();
+      match sig {
+        MultiSignature::Ed25519(hash) => data.encode(hash),
+        MultiSignature::Sr25519(hash) => data.encode(hash),
+        _ => Err(format!("ClaimVariantNotAllowed"))?,
+      }
+      Ok(())
+    },
+  )?;
 
   Ok(())
 }
