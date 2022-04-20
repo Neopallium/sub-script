@@ -29,6 +29,7 @@
   "H256": "[u8; 32]",
   "H512": "[u8; 64]",
   "Hash": "H256",
+  "Sha256Hash": "H256",
   "MultiAddress": {
     "_enum": {
       "Id": "AccountId",

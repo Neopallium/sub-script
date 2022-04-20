@@ -42,11 +42,19 @@ impl EnumVariants {
 
   pub fn insert_at(&mut self, idx: u8, name: &str, type_ref: Option<TypeRef>) {
     let len = idx as usize;
-    while len > self.variants.len() {
-      self.variants.push(None);
+    if let Some(variant) = self.variants.get_mut(len) {
+      *variant = Some(EnumVariant {
+        idx,
+        name: name.into(),
+        type_ref,
+      });
+    } else {
+      while len > self.variants.len() {
+        self.variants.push(None);
+      }
+      let insert_idx = self.insert(name, type_ref);
+      assert!(insert_idx == idx);
     }
-    let insert_idx = self.insert(name, type_ref);
-    assert!(insert_idx == idx);
   }
 
   pub fn insert(&mut self, name: &str, type_ref: Option<TypeRef>) -> u8 {
