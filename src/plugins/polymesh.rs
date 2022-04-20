@@ -211,7 +211,7 @@ pub fn init_engine(
       match sig {
         MultiSignature::Ed25519(hash) => data.encode(hash),
         MultiSignature::Sr25519(hash) => data.encode(hash),
-        _ => Err(format!("ClaimVariantNotAllowed"))?,
+        _ => Err(format!("Unsupported Signature -> H512 conversion."))?,
       }
       Ok(())
     },
