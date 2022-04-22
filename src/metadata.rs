@@ -1855,7 +1855,6 @@ impl FuncMetadata {
     if args_len > 0 {
       args.extend([TypeId::of::<Dynamic>()].repeat(args_len));
     }
-    #[allow(deprecated)]
     engine.register_raw_fn(&full_name, &args, encode_call);
 
     let mut encode_call = FnPtr::new(full_name)?;

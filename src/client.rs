@@ -69,7 +69,7 @@ impl<'a> Encode for SignedPayload<'a> {
   }
 }
 
-/// Current version of the [`UncheckedExtrinsic`] format.
+/// Current version of the `UncheckedExtrinsic` format.
 pub const EXTRINSIC_VERSION: u8 = 4;
 
 #[derive(Clone)]

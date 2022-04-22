@@ -1,7 +1,6 @@
 use sub_script::engine::*;
 
 use std::path::PathBuf;
-use std::{fs::File, io::Read, process::exit};
 
 use anyhow::{anyhow, Result};
 use structopt::StructOpt;
@@ -42,69 +41,19 @@ fn main() -> Result<()> {
 
   let opt = Opt::from_args();
 
-  let mut contents = String::new();
-
-  let filename = match opt.script.as_path().canonicalize() {
-    Err(err) => {
-      eprintln!("Error script file path: {:?}\n{}", opt.script, err);
-      exit(1);
-    }
-    Ok(f) => match f.strip_prefix(std::env::current_dir().unwrap().canonicalize().unwrap()) {
-      Ok(f) => f.into(),
-      _ => f,
-    },
-  };
-
-  let mut f = match File::open(&filename) {
-    Err(err) => {
-      eprintln!(
-        "Error reading script file: {}\n{}",
-        filename.to_string_lossy(),
-        err
-      );
-      exit(1);
-    }
-    Ok(f) => f,
-  };
-
-  contents.clear();
-
-  if let Err(err) = f.read_to_string(&mut contents) {
-    eprintln!(
-      "Error reading script file: {}\n{}",
-      filename.to_string_lossy(),
-      err
-    );
-    exit(1);
-  }
-
-  let contents = if contents.starts_with("#!") {
-    // Skip shebang
-    &contents[contents.find('\n').unwrap_or(0)..]
-  } else {
-    &contents[..]
-  };
+  let script = opt.script.clone();
 
   let engine_opts = opt.into_engine_opts();
-  let (engine, mut scope) =
+  let engine =
     init_engine(&engine_opts).map_err(|e| anyhow!("Failed to initial engine: {:?}", e))?;
 
-  if let Err(err) = engine
-    .compile(contents)
-    .map_err(|err| err.into())
-    .and_then(|mut ast| {
-      ast.set_source(filename.to_string_lossy().to_string());
-      engine.run_ast_with_scope(&mut scope, &ast)
-    })
-  {
-    let filename = filename.to_string_lossy();
+  let mut scope = engine.args_to_scope(&engine_opts.args[..]);
 
-    eprintln!("{:=<1$}", "", filename.len());
-    eprintln!("{}", filename);
-    eprintln!("{:=<1$}", "", filename.len());
-    eprintln!("");
-
-    eprint_error(contents, *err);
+  match engine.run_file_with_scope(&mut scope, script.clone()) {
+    Err(err) => {
+      eprint_script_error(&script, *err);
+    }
+    _ => (),
   }
 
   Ok(())

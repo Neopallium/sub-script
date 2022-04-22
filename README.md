@@ -6,8 +6,9 @@ It uses [Rhai](https://rhai.rs) for the scripting engine.
 ## Features
 
 - Auto generate key pairs for named users by accessing `USER.<UserName>`.
-- Loads chain metadata for all modules, extrinsics, events and storages.
+- Loads chain metadata for all modules, extrinsics, events, storages and types (for v14+ Metadata chains).
 - Easy to sign and submit extrinsic calls.
+- Spawning sub-task (threads) for load testing.
 
 ## Goals
 
@@ -24,7 +25,6 @@ It uses [Rhai](https://rhai.rs) for the scripting engine.
 
 - Subscribe to storage updates.
 - Add REPL support for quickly making extrinsic calls.
-- Support spawning sub-tasks for load testing.
 
 ## Examples
 
