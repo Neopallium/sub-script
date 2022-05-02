@@ -16,4 +16,4 @@ let offset = ARG.shift();
 offset = if offset == () { 0 } else { parse_int(offset) };
 count += offset;
 
-p::create_asset_batch(prefix, offset, count, supply);
+p::create_asset_batch(prefix, offset, count, supply, true);
