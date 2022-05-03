@@ -111,7 +111,7 @@ impl Encode for ExtrinsicV4 {
         sig.encode_to(&mut buf);
       }
       None => {
-        buf.push(EXTRINSIC_VERSION | 0b0111_1111);
+        buf.push(EXTRINSIC_VERSION & 0b0111_1111);
       }
     }
     self.call.encode_to(&mut buf);
