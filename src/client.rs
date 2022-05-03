@@ -157,6 +157,24 @@ impl Block {
     self.extrinsics.iter().position(|xt| xt == xthex)
   }
 
+  pub fn extrinsics_filtered(&mut self, xthex_partial: &str) -> Dynamic {
+    Dynamic::from(self.extrinsics.iter().filter_map(|xthex| {
+      if xthex.contains(xthex_partial) {
+        Some(Dynamic::from(xthex.clone()))
+      } else {
+        None
+      }
+    }).collect::<Vec<_>>())
+  }
+
+  pub fn parent(&mut self) -> BlockHash {
+    self.header.parent_hash
+  }
+
+  pub fn block_number(&mut self) -> i64 {
+    self.header.number as i64
+  }
+
   pub fn to_string(&mut self) -> String {
     format!("{:?}", self)
   }
@@ -295,13 +313,17 @@ impl InnerClient {
     )
   }
 
-  /// Get genesis hash from rpc node.
-  fn rpc_get_genesis_hash(rpc: &RpcHandler) -> Result<BlockHash, Box<EvalAltResult>> {
+  /// Get block hash from rpc node.
+  fn rpc_get_block_hash(rpc: &RpcHandler, block_number: u64) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
     Ok(
       rpc
-        .call_method("chain_getBlockHash", json!([0u64]))?
-        .ok_or_else(|| format!("Failed to get genesis hash from node."))?,
+        .call_method("chain_getBlockHash", json!([block_number]))?
     )
+  }
+
+  /// Get genesis hash from rpc node.
+  fn rpc_get_genesis_hash(rpc: &RpcHandler) -> Result<BlockHash, Box<EvalAltResult>> {
+    Ok(Self::rpc_get_block_hash(rpc, 0)?.ok_or_else(|| format!("Failed to get genesis hash from node."))?)
   }
 
   /// Get metadata from rpc node.
@@ -330,6 +352,16 @@ impl InnerClient {
       (),
       (),
     )
+  }
+
+  /// Get block hash.
+  pub fn get_block_hash(&self, block_number: u64) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
+    Self::rpc_get_block_hash(&self.rpc, block_number)
+  }
+
+  pub fn get_block_by_number(&self, block_number: u64) -> Result<Option<Block>, Box<EvalAltResult>> {
+    let hash = self.get_block_hash(block_number)?;
+    self.get_block(hash)
   }
 
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
@@ -596,8 +628,16 @@ impl Client {
     self.inner.read().unwrap().get_chain_properties()
   }
 
+  pub fn get_block_hash(&self, block_number: u64) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_block_hash(block_number)
+  }
+
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
     self.inner.read().unwrap().get_block(hash)
+  }
+
+  pub fn get_block_by_number(&self, block_number: u64) -> Result<Option<Block>, Box<EvalAltResult>> {
+    self.inner.read().unwrap().get_block_by_number(block_number)
   }
 
   pub fn get_storage_keys_paged(
@@ -873,8 +913,31 @@ pub fn init_engine(
 ) -> Result<Client, Box<EvalAltResult>> {
   engine
     .register_type_with_name::<Client>("Client")
+    .register_result_fn("get_block_hash", |client: &mut Client, num: i64| {
+      match client.get_block_hash(num as u64)? {
+        Some(hash) => Ok(Dynamic::from(hash)),
+        None => Ok(Dynamic::UNIT),
+      }
+    })
+    .register_result_fn("get_block", |client: &mut Client, hash: Dynamic| {
+      match client.get_block(hash.try_cast::<BlockHash>())? {
+        Some(block) => Ok(Dynamic::from(block)),
+        None => Ok(Dynamic::UNIT),
+      }
+    })
+    .register_result_fn("get_block_by_number", |client: &mut Client, num: i64| {
+      match client.get_block_by_number(num as u64)? {
+        Some(block) => Ok(Dynamic::from(block)),
+        None => Ok(Dynamic::UNIT),
+      }
+    })
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
+    .register_type_with_name::<BlockHash>("BlockHash")
+    .register_fn("to_string", |hash: &mut BlockHash| hash.to_string())
     .register_type_with_name::<Block>("Block")
+    .register_fn("extrinsics_filtered", Block::extrinsics_filtered)
+    .register_get("parent", Block::parent)
+    .register_get("block_number", Block::block_number)
     .register_fn("to_string", Block::to_string)
     .register_type_with_name::<EventRecords>("EventRecords")
     .register_fn("to_string", EventRecords::to_string)
