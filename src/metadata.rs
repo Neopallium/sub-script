@@ -99,9 +99,10 @@ impl Metadata {
       idx_map: HashMap::new(),
     };
 
-    // Top-level event/error types.
+    // Top-level event/error/call types.
     let mut mod_events = EnumVariants::new();
     let mut mod_errors = EnumVariants::new();
+    let mut mod_calls = EnumVariants::new();
 
     // Decode module metadata.
     decode_meta(&md.modules)?
@@ -111,6 +112,7 @@ impl Metadata {
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
         mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        mod_calls.insert_at(m.index, &name, m.call_ref.clone());
         api_md.idx_map.insert(m.index, name.clone());
         api_md.modules.insert(name, m);
         Ok(())
@@ -120,6 +122,8 @@ impl Metadata {
     lookup.insert("Event", raw_event_ref);
     let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
     lookup.insert("DispatchErrorModule", raw_error_ref);
+    // Define 'RuntimeCall' type.
+    lookup.insert_meta("RuntimeCall", TypeMeta::Enum(mod_calls));
 
     Ok(api_md)
   }
@@ -134,9 +138,10 @@ impl Metadata {
       idx_map: HashMap::new(),
     };
 
-    // Top-level event/error types.
+    // Top-level event/error/call types.
     let mut mod_events = EnumVariants::new();
     let mut mod_errors = EnumVariants::new();
+    let mut mod_calls = EnumVariants::new();
 
     // Decode module metadata.
     decode_meta(&md.modules)?
@@ -146,6 +151,7 @@ impl Metadata {
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
         mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        mod_calls.insert_at(m.index, &name, m.call_ref.clone());
         api_md.idx_map.insert(m.index, name.clone());
         api_md.modules.insert(name, m);
         Ok(())
@@ -155,6 +161,8 @@ impl Metadata {
     lookup.insert("Event", raw_event_ref);
     let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
     lookup.insert("DispatchErrorModule", raw_error_ref);
+    let call_ref = lookup.insert_meta("Call", TypeMeta::Enum(mod_calls));
+    lookup.insert("Call", call_ref);
 
     Ok(api_md)
   }
@@ -169,9 +177,10 @@ impl Metadata {
       idx_map: HashMap::new(),
     };
 
-    // Top-level event/error types.
+    // Top-level event/error/call types.
     let mut mod_events = EnumVariants::new();
     let mut mod_errors = EnumVariants::new();
+    let mut mod_calls = EnumVariants::new();
 
     // Decode module metadata.
     md.pallets
@@ -181,6 +190,7 @@ impl Metadata {
         let name = m.name.clone();
         mod_events.insert_at(m.index, &name, m.event_ref.clone());
         mod_errors.insert_at(m.index, &name, m.error_ref.clone());
+        mod_calls.insert_at(m.index, &name, m.call_ref.clone());
         api_md.idx_map.insert(m.index, name.clone());
         api_md.modules.insert(name, m);
         Ok(())
@@ -190,6 +200,8 @@ impl Metadata {
     lookup.insert("Event", raw_event_ref);
     let raw_error_ref = lookup.insert_meta("RawError", TypeMeta::Enum(mod_errors));
     lookup.insert("DispatchErrorModule", raw_error_ref);
+    let call_ref = lookup.insert_meta("Call", TypeMeta::Enum(mod_calls));
+    lookup.insert("Call", call_ref);
 
     Ok(api_md)
   }
@@ -260,6 +272,7 @@ pub struct ModuleMetadata {
   err_idx_map: HashMap<u8, String>,
   event_ref: Option<TypeRef>,
   error_ref: Option<TypeRef>,
+  call_ref: Option<TypeRef>,
 }
 
 impl ModuleMetadata {
@@ -282,18 +295,27 @@ impl ModuleMetadata {
       err_idx_map: HashMap::new(),
       event_ref: None,
       error_ref: None,
+      call_ref: None,
     };
 
     // Decode module functions.
     if let Some(calls) = &md.calls {
+      // Module RawCall type.
+      let mut raw_calls = EnumVariants::new();
+
       decode_meta(calls)?.iter().enumerate().try_for_each(
         |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let func = FuncMetadata::from_v12_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
+          let (func, ty_ref) = FuncMetadata::from_v12_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
           let name = func.name.clone();
+          raw_calls.insert_at(func.func_idx, &name, ty_ref);
           module.funcs.insert(name, func);
           Ok(())
         },
       )?;
+      module.call_ref = Some(lookup.insert_meta(
+        &format!("{}::RawCall", mod_name),
+        TypeMeta::Enum(raw_calls),
+      ));
     }
 
     // Decode module storage.
@@ -383,18 +405,27 @@ impl ModuleMetadata {
       err_idx_map: HashMap::new(),
       event_ref: None,
       error_ref: None,
+      call_ref: None,
     };
 
     // Decode module functions.
     if let Some(calls) = &md.calls {
+      // Module RawCall type.
+      let mut raw_calls = EnumVariants::new();
+
       decode_meta(calls)?.iter().enumerate().try_for_each(
         |(func_idx, md)| -> Result<(), Box<EvalAltResult>> {
-          let func = FuncMetadata::from_v13_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
+          let (func, ty_ref) = FuncMetadata::from_v13_meta(&mod_name, mod_idx, func_idx as u8, md, lookup)?;
           let name = func.name.clone();
+          raw_calls.insert_at(func.func_idx, &name, ty_ref);
           module.funcs.insert(name, func);
           Ok(())
         },
       )?;
+      module.call_ref = Some(lookup.insert_meta(
+        &format!("{}::RawCall", mod_name),
+        TypeMeta::Enum(raw_calls),
+      ));
     }
 
     // Decode module storage.
@@ -486,18 +517,23 @@ impl ModuleMetadata {
       err_idx_map: HashMap::new(),
       event_ref: None,
       error_ref: None,
+      call_ref: None,
     };
 
     // Decode module functions.
     if let Some(calls) = &md.calls {
+      // Module RawCall type.
+      let mut raw_calls = EnumVariants::new();
+
       let call_ty = types.resolve(calls.ty.id())
         .expect("Missing Pallet call type");
       match call_ty.type_def() {
         TypeDef::Variant(v) => {
           v.variants().iter().try_for_each(
             |md| -> Result<(), Box<EvalAltResult>> {
-              let func = FuncMetadata::from_v14_meta(&mod_name, mod_idx, md, types, lookup)?;
+              let (func, ty_ref) = FuncMetadata::from_v14_meta(&mod_name, mod_idx, md, types, lookup)?;
               let name = func.name.clone();
+              raw_calls.insert_at(func.func_idx, &name, ty_ref);
               module.funcs.insert(name, func);
               Ok(())
             },
@@ -507,6 +543,10 @@ impl ModuleMetadata {
           unimplemented!("Only Variant type supported for Pallet Call type.");
         }
       }
+      module.call_ref = Some(lookup.insert_meta(
+        &format!("{}::RawCall", mod_name),
+        TypeMeta::Enum(raw_calls),
+      ));
     }
 
     // Decode module storage.
@@ -1768,7 +1808,7 @@ impl FuncMetadata {
     func_idx: u8,
     md: &frame_metadata::v12::FunctionMetadata,
     lookup: &TypeLookup,
-  ) -> Result<Self, Box<EvalAltResult>> {
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut func = Self {
       mod_name: mod_name.into(),
       name: decode_meta(&md.name)?.clone(),
@@ -1778,16 +1818,26 @@ impl FuncMetadata {
       docs: Docs::from_v12_meta(&md.documentation)?,
     };
 
+    let mut func_tuple = Vec::new();
+
     // Decode function arguments.
     decode_meta(&md.arguments)?
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
         let arg = FuncArg::from_v12_meta(md, lookup)?;
+        func_tuple.push(arg.ty.ty_meta.clone());
         func.args.push(arg);
         Ok(())
       })?;
 
-    Ok(func)
+    let func_ref = if func_tuple.len() > 0 {
+      let type_name = format!("{}::RawFunc::{}", mod_name, func.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(func_tuple)))
+    } else {
+      None
+    };
+
+    Ok((func, func_ref))
   }
 
   #[cfg(feature = "v13")]
@@ -1797,7 +1847,7 @@ impl FuncMetadata {
     func_idx: u8,
     md: &frame_metadata::v13::FunctionMetadata,
     lookup: &TypeLookup,
-  ) -> Result<Self, Box<EvalAltResult>> {
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut func = Self {
       mod_name: mod_name.into(),
       name: decode_meta(&md.name)?.clone(),
@@ -1807,16 +1857,26 @@ impl FuncMetadata {
       docs: Docs::from_v13_meta(&md.documentation)?,
     };
 
+    let mut func_tuple = Vec::new();
+
     // Decode function arguments.
     decode_meta(&md.arguments)?
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
         let arg = FuncArg::from_v13_meta(md, lookup)?;
+        func_tuple.push(arg.ty.ty_meta.clone());
         func.args.push(arg);
         Ok(())
       })?;
 
-    Ok(func)
+    let func_ref = if func_tuple.len() > 0 {
+      let type_name = format!("{}::RawFunc::{}", mod_name, func.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(func_tuple)))
+    } else {
+      None
+    };
+
+    Ok((func, func_ref))
   }
 
   #[cfg(feature = "v14")]
@@ -1826,7 +1886,7 @@ impl FuncMetadata {
     md: &Variant<PortableForm>,
     types: &PortableRegistry,
     lookup: &TypeLookup,
-  ) -> Result<Self, Box<EvalAltResult>> {
+  ) -> Result<(Self, Option<TypeRef>), Box<EvalAltResult>> {
     let mut func = Self {
       mod_name: mod_name.into(),
       name: md.name().clone(),
@@ -1836,16 +1896,26 @@ impl FuncMetadata {
       docs: Docs::from_v14_meta(&md.docs()),
     };
 
+    let mut func_tuple = Vec::new();
+
     // Decode function arguments.
     md.fields()
       .iter()
       .try_for_each(|md| -> Result<(), Box<EvalAltResult>> {
         let arg = FuncArg::from_v14_meta(md, types, lookup)?;
+        func_tuple.push(arg.ty.ty_meta.clone());
         func.args.push(arg);
         Ok(())
       })?;
 
-    Ok(func)
+    let func_ref = if func_tuple.len() > 0 {
+      let type_name = format!("{}::RawFunc::{}", mod_name, func.name);
+      Some(lookup.insert_meta(&type_name, TypeMeta::Tuple(func_tuple)))
+    } else {
+      None
+    };
+
+    Ok((func, func_ref))
   }
 
   pub fn add_encode_calls(&self, engine: &mut Engine) -> Result<Dynamic, Box<EvalAltResult>> {

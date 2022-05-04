@@ -72,7 +72,7 @@
   "SessionIndex": "u32",
   "AuthIndex": "u32",
   "OpaquePeerId": "Vec<u8>",
-  "OpaqueMultiaddr": "Vec<u8>",
+  "OpaqueMultiaddr": "Text",
   "OpaqueNetworkState": {
     "peer_id": "OpaquePeerId",
     "external_addresses": "Vec<OpaqueMultiaddr>"
@@ -81,7 +81,7 @@
     "block_number": "BlockNumber",
     "network_state": "OpaqueNetworkState",
     "session_index": "SessionIndex",
-    "authoriy_index": "AuthIndex",
+    "authority_index": "AuthIndex",
     "validators_len": "u32"
   },
   "ConsensusEngineId": "[u8; 4]",
@@ -236,7 +236,8 @@
 		}
 	},
 	"Signature": "MultiSignature",
-  "<AuthorityId as RuntimeAppPublic>::Signature": "Signature",
+  "<AuthorityId as RuntimeAppPublic>::Signature": "[u8; 64]",
+  "Call": "RuntimeCall",
   "<T as Config>::Call": "Call",
   "<T as frame_system::Config>::Call": "Call"
 }

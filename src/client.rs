@@ -98,6 +98,23 @@ impl ExtrinsicV4 {
     hex.insert_str(0, "0x");
     hex
   }
+
+  pub fn decode_call(call_ty: &TypeRef, xt: &mut &[u8]) -> Result<Dynamic, Box<EvalAltResult>> {
+    // Decode Vec length.
+    let _len: Compact<u32> = Decode::decode(xt).map_err(|e| e.to_string())?;
+    // Version and signed flag.
+    let version: u8 = Decode::decode(xt).map_err(|e| e.to_string())?;
+    let is_signed = version & 0b1000_0000 != 0;
+    if (version & 0b0111_1111) != EXTRINSIC_VERSION {
+      Err("Invalid EXTRINSIC_VERSION")?;
+    }
+
+    if is_signed {
+      let _sig: (GenericAddress, MultiSignature, Extra) = Decode::decode(xt).map_err(|e| e.to_string())?;
+    }
+
+    call_ty.decode(xt.to_vec())
+  }
 }
 
 impl Encode for ExtrinsicV4 {
@@ -150,6 +167,8 @@ pub struct SignedBlock {
 pub struct Block {
   extrinsics: Vec<String>,
   header: generic::Header<u32, traits::BlakeTwo256>,
+  #[serde(skip)]
+  call_ty: Option<TypeRef>,
 }
 
 impl Block {
@@ -160,7 +179,24 @@ impl Block {
   pub fn extrinsics_filtered(&mut self, xthex_partial: &str) -> Dynamic {
     Dynamic::from(self.extrinsics.iter().filter_map(|xthex| {
       if xthex.contains(xthex_partial) {
-        Some(Dynamic::from(xthex.clone()))
+        self.call_ty
+          .as_ref()
+          .map_or_else(
+            || Some(Dynamic::from(xthex.clone())),
+            |call_ty| {
+              if xthex.starts_with("0x") {
+                hex::decode(&xthex[2..]).ok()
+                  .map(|xt| {
+                    ExtrinsicV4::decode_call(call_ty, &mut &xt[..])
+                      .map_err(|e| eprintln!("Call decode failed: {:?}", e))
+                      .ok()
+                  })
+                  .flatten()
+              } else {
+                None
+              }
+            }
+          )
       } else {
         None
       }
@@ -276,6 +312,7 @@ pub struct InnerClient {
   metadata: Metadata,
   event_records: TypeRef,
   account_info: TypeRef,
+  call_ty: TypeRef,
   cached_blocks: DashMap<BlockHash, Block>,
   cached_events: DashMap<BlockHash, Dynamic>,
 }
@@ -292,6 +329,7 @@ impl InnerClient {
 
     let event_records = lookup.resolve("EventRecords");
     let account_info = lookup.resolve("AccountInfo");
+    let call_ty = lookup.resolve("Call");
     Ok(Arc::new(RwLock::new(Self {
       rpc,
       runtime_version,
@@ -299,6 +337,7 @@ impl InnerClient {
       metadata,
       event_records,
       account_info,
+      call_ty,
       cached_blocks: DashMap::new(),
       cached_events: DashMap::new(),
     })))
@@ -373,7 +412,10 @@ impl InnerClient {
       } else {
         let block = self
           .get_signed_block(Some(hash))?
-          .map(|signed| signed.block);
+          .map(|mut signed| {
+            signed.block.call_ty = Some(self.call_ty.clone());
+            signed.block
+          });
         if let Some(block) = &block {
           // Cache new block.
           self.cached_blocks.insert(hash, block.clone());

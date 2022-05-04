@@ -725,10 +725,10 @@ impl TypeMeta {
 
       TypeMeta::Compact(type_ref) => type_ref.decode_value(input, true)?,
       TypeMeta::Box(type_ref) | TypeMeta::NewType(_, type_ref) => {
-        type_ref.decode_value(input, false)?
+        type_ref.decode_value(input, is_compact)?
       }
 
-      TypeMeta::CustomType(custom) => custom.decode_value(input, false)?,
+      TypeMeta::CustomType(custom) => custom.decode_value(input, is_compact)?,
       TypeMeta::Unresolved(type_def) => {
         log::error!("Unresolved type: {}", type_def);
         Err("Unresolved type")?
@@ -1255,6 +1255,39 @@ pub fn init_engine(
       Ok(())
     },
   )?;
+
+  #[cfg(feature = "libp2p")]
+  {
+    use libp2p_core::{PeerId, Multiaddr};
+
+    engine
+      .register_type_with_name::<PeerId>("PeerId")
+      .register_fn("to_string", |id: &mut PeerId| id.to_base58())
+      .register_fn("to_debug", |id: &mut PeerId| id.to_base58())
+      .register_type_with_name::<Multiaddr>("Multiaddr")
+      .register_fn("to_string", |m: &mut Multiaddr| format!("{}", m))
+      .register_fn("to_debug", |m: &mut Multiaddr| format!("{:?}", m));
+
+    types.custom_decode("OpaquePeerId", |mut input| {
+      let opaque_bytes: Vec<u8> = Decode::decode(&mut input)?;
+      let data: Vec<u8> = Decode::decode(&mut &opaque_bytes[..])?;
+      let peer = PeerId::from_bytes(&data[..]).map_err(|e| {
+        eprintln!("Failed to decode PeerId: {:?}", e);
+        "Failed to decode PeerId"
+      })?;
+      Ok(Dynamic::from(peer))
+    })?;
+
+    types.custom_decode("OpaqueMultiaddr", |mut input| {
+      let opaque_bytes: Vec<u8> = Decode::decode(&mut input)?;
+      let data: String = Decode::decode(&mut &opaque_bytes[..])?;
+      let multiaddr = Multiaddr::try_from(data).map_err(|e| {
+        eprintln!("Failed to decode Multiaddr: {:?}", e);
+        "Failed to decode Multiaddr"
+      })?;
+      Ok(Dynamic::from(multiaddr))
+    })?;
+  }
 
   let lookup = TypeLookup::from_types(types);
   Ok(lookup)
