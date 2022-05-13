@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 use std::thread;
 
 use serde::{de::DeserializeOwned, Deserialize};
@@ -426,8 +426,10 @@ impl Factory for RpcConnection {
 
 pub struct InnerRpcHandler {
   conn: RpcConnection,
+  // TODO: Move these into a `thread_local` struct.
+  // Each thread gets their own channel for waiting for responses and updates map.
   resp_tx: RespSender,
-  resp_rx: RespReceiver,
+  resp_rx: Mutex<RespReceiver>,
   updates: DashMap<RequestToken, ResponseEvent>,
 }
 
@@ -437,7 +439,7 @@ impl InnerRpcHandler {
     Arc::new(Self {
       conn,
       resp_tx,
-      resp_rx,
+      resp_rx: Mutex::new(resp_rx),
       updates: DashMap::new(),
     })
   }
@@ -451,60 +453,42 @@ impl InnerRpcHandler {
   }
 
   pub fn get_response(&self, token: RequestToken) -> Result<ResponseEvent, Box<EvalAltResult>> {
+    // Check if the response has already arrived.
     if let Some((_, resp)) = self.updates.remove(&token) {
       log::debug!("------ response was already received: {:?}", token);
       return Ok(resp);
     }
     log::debug!("------ get updates.");
-    match self.get_updates(Some(token))? {
-      Some(resp) => Ok(resp),
-      None => Err(format!("Failed to get response for request: {:?}", token))?,
-    }
+    self.wait_for_update(token)
   }
 
   fn get_sender(&self) -> RespSender {
     self.resp_tx.clone()
   }
 
-  fn get_one_update(&self, wait: bool) -> Result<Option<ResponseMessage>, Box<EvalAltResult>> {
-    if wait {
-      Ok(Some(
-        self
-          .resp_rx
-          .recv()
-          .map_err(|_| format!("RpcConnection closed"))?,
-      ))
-    } else {
-      use crossbeam_channel::TryRecvError::*;
-      match self.resp_rx.try_recv() {
-        Ok(resp) => Ok(Some(resp)),
-        Err(Empty) => Ok(None),
-        Err(Disconnected) => Err(format!("RpcConnection closed"))?,
-      }
-    }
-  }
-
-  fn get_updates(
+  fn wait_for_update(
     &self,
-    wait_for: Option<RequestToken>,
-  ) -> Result<Option<ResponseEvent>, Box<EvalAltResult>> {
-    let wait = wait_for.is_some();
+    wait_for: RequestToken,
+  ) -> Result<ResponseEvent, Box<EvalAltResult>> {
     loop {
-      match self.get_one_update(wait)? {
-        Some(resp) => {
-          if wait_for == Some(resp.token) {
-            log::debug!("------ got response we wanted: {:?}", resp.token);
-            return Ok(Some(resp.event));
-          }
-          log::debug!("------ cache response: {:?}", resp.token);
-          self.updates.insert(resp.token, resp.event);
-        }
-        None => {
-          break;
-        }
+      let resp_rx = self.resp_rx.lock().unwrap();
+      // We need to check again for the response after acquiring the lock.
+      if let Some((_, resp)) = self.updates.remove(&wait_for) {
+        log::debug!("------ response was already received: {:?}", wait_for);
+        return Ok(resp);
       }
+
+      // Wait for an update from the RPC connection.
+      let resp = resp_rx
+          .recv()
+          .map_err(|_| format!("RpcConnection closed"))?;
+      if wait_for == resp.token {
+        log::debug!("------ got response we wanted: {:?}", resp.token);
+        return Ok(resp.event);
+      }
+      log::debug!("------ cache response: {:?}", resp.token);
+      self.updates.insert(resp.token, resp.event);
     }
-    return Ok(None);
   }
 }
 
