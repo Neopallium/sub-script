@@ -1,6 +1,6 @@
 use std::any::TypeId;
 use std::convert::TryFrom;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use hex::FromHex;
 
@@ -321,7 +321,7 @@ impl InnerClient {
   pub fn new(
     rpc: RpcHandler,
     lookup: &TypeLookup,
-  ) -> Result<Arc<RwLock<Self>>, Box<EvalAltResult>> {
+  ) -> Result<Arc<Self>, Box<EvalAltResult>> {
     let runtime_version = Self::rpc_get_runtime_version(&rpc)?;
     let genesis_hash = Self::rpc_get_genesis_hash(&rpc)?;
     let runtime_metadata = Self::rpc_get_runtime_metadata(&rpc)?;
@@ -330,7 +330,7 @@ impl InnerClient {
     let event_records = lookup.resolve("EventRecords");
     let account_info = lookup.resolve("AccountInfo");
     let call_ty = lookup.resolve("Call");
-    Ok(Arc::new(RwLock::new(Self {
+    Ok(Arc::new(Self {
       rpc,
       runtime_version,
       genesis_hash,
@@ -340,7 +340,7 @@ impl InnerClient {
       call_ty,
       cached_blocks: DashMap::new(),
       cached_events: DashMap::new(),
-    })))
+    }))
   }
 
   /// Get runtime version from rpc node.
@@ -648,7 +648,7 @@ impl InnerClient {
 
 #[derive(Clone)]
 pub struct Client {
-  inner: Arc<RwLock<InnerClient>>,
+  inner: Arc<InnerClient>,
 }
 
 impl Client {
@@ -659,27 +659,27 @@ impl Client {
   }
 
   pub fn get_metadata(&self) -> Metadata {
-    self.inner.read().unwrap().get_metadata()
+    self.inner.get_metadata()
   }
 
   pub fn get_signed_extra(&self) -> AdditionalSigned {
-    self.inner.read().unwrap().get_signed_extra()
+    self.inner.get_signed_extra()
   }
 
   pub fn get_chain_properties(&self) -> Result<Option<ChainProperties>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_chain_properties()
+    self.inner.get_chain_properties()
   }
 
   pub fn get_block_hash(&self, block_number: u64) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_block_hash(block_number)
+    self.inner.get_block_hash(block_number)
   }
 
   pub fn get_block(&self, hash: Option<BlockHash>) -> Result<Option<Block>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_block(hash)
+    self.inner.get_block(hash)
   }
 
   pub fn get_block_by_number(&self, block_number: u64) -> Result<Option<Block>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_block_by_number(block_number)
+    self.inner.get_block_by_number(block_number)
   }
 
   pub fn get_storage_keys_paged(
@@ -690,8 +690,6 @@ impl Client {
   ) -> Result<Vec<StorageKey>, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .get_storage_keys_paged(prefix, count, start_key)
   }
 
@@ -700,7 +698,7 @@ impl Client {
     key: StorageKey,
     at_block: Option<BlockHash>,
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_storage_by_key(key, at_block)
+    self.inner.get_storage_by_key(key, at_block)
   }
 
   pub fn get_storage_by_keys(
@@ -710,8 +708,6 @@ impl Client {
   ) -> Result<Vec<Option<StorageData>>, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .get_storage_by_keys(keys, at_block)
   }
 
@@ -723,8 +719,6 @@ impl Client {
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .get_storage_value(prefix, key_name, at_block)
   }
 
@@ -737,8 +731,6 @@ impl Client {
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .get_storage_map(prefix, key_name, map_key, at_block)
   }
 
@@ -752,31 +744,27 @@ impl Client {
   ) -> Result<Option<StorageData>, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .get_storage_double_map(prefix, storage_name, key1, key2, at_block)
   }
 
   pub fn get_events(&self, block: Option<BlockHash>) -> Result<Dynamic, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_events(block)
+    self.inner.get_events(block)
   }
 
   pub fn get_nonce(&self, account: AccountId) -> Result<Option<u32>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_nonce(account)
+    self.inner.get_nonce(account)
   }
 
   pub fn get_request_block_hash(
     &self,
     token: RequestToken,
   ) -> Result<Option<BlockHash>, Box<EvalAltResult>> {
-    self.inner.read().unwrap().get_request_block_hash(token)
+    self.inner.get_request_block_hash(token)
   }
 
   pub fn submit(&self, xthex: String) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .submit(xthex)
       .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
@@ -788,8 +776,6 @@ impl Client {
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .submit_call(user, call)
       .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
@@ -800,13 +786,11 @@ impl Client {
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
     self
       .inner
-      .read()
-      .unwrap()
       .submit_unsigned(call)
       .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
   }
 
-  pub fn inner(&self) -> Arc<RwLock<InnerClient>> {
+  pub fn inner(&self) -> Arc<InnerClient> {
     self.inner.clone()
   }
 }
