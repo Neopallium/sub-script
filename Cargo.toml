@@ -27,7 +27,6 @@ crossbeam-channel = "0.5"
 # substrate
 sp-core = { version = "3.0", default-features = false }
 sp-version = { version = "3.0", default-features = false }
-sp-keyring = { version = "3.0", default-features = false }
 sp-runtime = { version = "3.0", default-features = false }
 frame-support = { version = "3.0", default-features = false }
 frame-metadata = { version = "14.0.0", default-features = false, features = ["std"] }
