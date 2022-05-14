@@ -232,10 +232,7 @@ pub fn init_engine(opts: &EngineOptions) -> Result<SharedEngine, Box<EvalAltResu
   globals.insert("RPC".into(), Dynamic::from(rpc));
   globals.insert("Types".into(), Dynamic::from(lookup));
   globals.insert("STORAGE".into(), Dynamic::from(storage));
-
-  // Make sure there is only one shared copy of `Users`.
-  let users = Dynamic::from(users).into_shared();
-  globals.insert("USER".into(), users);
+  globals.insert("USER".into(), Dynamic::from(users));
 
   // For easier access to globals.
   engine.on_var(move |name, _, _| {

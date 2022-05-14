@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use sp_core::{sr25519, Pair};
 use sp_runtime::{AccountId32, MultiSignature};
+
+use dashmap::DashMap;
 
 use rhai::{Dynamic, Engine, EvalAltResult, INT};
 
@@ -104,40 +105,59 @@ impl SharedUser {
   }
 }
 
-#[derive(Clone)]
-pub struct Users {
-  users: HashMap<String, Dynamic>,
-  account_map: HashMap<AccountId, Dynamic>,
+pub struct InnerUsers {
+  users: DashMap<String, Dynamic>,
+  account_map: DashMap<AccountId, Dynamic>,
   client: Client,
 }
 
-impl Users {
+impl InnerUsers {
   pub fn new(client: Client) -> Self {
     Self {
-      users: HashMap::new(),
-      account_map: HashMap::new(),
+      users: DashMap::new(),
+      account_map: DashMap::new(),
       client,
     }
   }
 
-  pub fn find_by_account(&mut self, acc: AccountId) -> Dynamic {
-    self.account_map.get(&acc).cloned().unwrap_or(Dynamic::UNIT)
+  pub fn find_by_account(&self, acc: AccountId) -> Dynamic {
+    self.account_map.get(&acc).as_deref().cloned().unwrap_or(Dynamic::UNIT)
   }
 
-  fn get_user(&mut self, name: String) -> Result<Dynamic, Box<EvalAltResult>> {
-    use std::collections::hash_map::Entry;
+  fn get_user(&self, name: String) -> Result<Dynamic, Box<EvalAltResult>> {
+    // Try save user.  If another thread generated the user first, then use that user.
+    use dashmap::mapref::entry::Entry;
     Ok(match self.users.entry(name) {
       Entry::Occupied(entry) => entry.get().clone(),
       Entry::Vacant(entry) => {
+        // Generate new user.
         let user = User::new(self.client.clone(), entry.key())?;
         let acc = user.acc();
         // Create a shared wrapper for the user.
         let shared = Dynamic::from(SharedUser(Arc::new(RwLock::new(user))));
-        entry.insert(shared.clone());
+
         self.account_map.insert(acc, shared.clone());
+        entry.insert(shared.clone());
         shared
       }
     })
+  }
+}
+
+#[derive(Clone)]
+pub struct Users(Arc<InnerUsers>);
+
+impl Users {
+  pub fn new(client: Client) -> Self {
+    Self(Arc::new(InnerUsers::new(client)))
+  }
+
+  pub fn find_by_account(&mut self, acc: AccountId) -> Dynamic {
+    self.0.find_by_account(acc)
+  }
+
+  fn get_user(&mut self, name: String) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.0.get_user(name)
   }
 }
 
