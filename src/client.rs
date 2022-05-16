@@ -1,6 +1,6 @@
 use std::any::TypeId;
 use std::convert::TryFrom;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use hex::FromHex;
 
@@ -377,6 +377,10 @@ impl InnerClient {
     Ok(RuntimeMetadataPrefixed::decode(&mut bytes.as_slice()).map_err(|e| e.to_string())?)
   }
 
+  pub fn get_transaction_version(&self) -> i64 {
+    self.runtime_version.transaction_version as i64
+  }
+
   pub fn get_metadata(&self) -> Metadata {
     self.metadata.clone()
   }
@@ -658,6 +662,10 @@ impl Client {
     })
   }
 
+  pub fn get_transaction_version(&self) -> i64 {
+    self.inner.get_transaction_version()
+  }
+
   pub fn get_metadata(&self) -> Metadata {
     self.inner.get_metadata()
   }
@@ -762,11 +770,13 @@ impl Client {
     self.inner.get_request_block_hash(token)
   }
 
+  fn call_results(&self, res: Result<(RequestToken, String), Box<EvalAltResult>>) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
+     let (token, xthex) = res?;
+     Ok(ExtrinsicCallResult::new(self, token, xthex))
+  }
+
   pub fn submit(&self, xthex: String) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
-    self
-      .inner
-      .submit(xthex)
-      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
+    self.call_results(self.inner.submit(xthex))
   }
 
   pub fn submit_call(
@@ -774,20 +784,14 @@ impl Client {
     user: &User,
     call: EncodedCall,
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
-    self
-      .inner
-      .submit_call(user, call)
-      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
+    self.call_results(self.inner.submit_call(user, call))
   }
 
   pub fn submit_unsigned(
     &self,
     call: EncodedCall,
   ) -> Result<ExtrinsicCallResult, Box<EvalAltResult>> {
-    self
-      .inner
-      .submit_unsigned(call)
-      .map(|(token, xthex)| ExtrinsicCallResult::new(self, token, xthex))
+    self.call_results(self.inner.submit_unsigned(call))
   }
 
   pub fn inner(&self) -> Arc<InnerClient> {
@@ -795,10 +799,8 @@ impl Client {
   }
 }
 
-#[derive(Clone)]
-pub struct ExtrinsicCallResult {
+pub struct InnerCallResult {
   client: Client,
-  loaded: bool,
   token: RequestToken,
   hash: Option<BlockHash>,
   xthex: String,
@@ -806,11 +808,10 @@ pub struct ExtrinsicCallResult {
   events: Option<EventRecords>,
 }
 
-impl ExtrinsicCallResult {
+impl InnerCallResult {
   pub fn new(client: &Client, token: RequestToken, xthex: String) -> Self {
     Self {
       client: client.clone(),
-      loaded: false,
       token,
       hash: None,
       xthex,
@@ -820,11 +821,10 @@ impl ExtrinsicCallResult {
   }
 
   fn get_block_hash(&mut self) -> Result<(), Box<EvalAltResult>> {
-    if self.loaded {
+    if self.hash.is_some() {
       return Ok(());
     }
 
-    self.loaded = true;
     self.hash = self.client.get_request_block_hash(self.token)?;
 
     Ok(())
@@ -915,7 +915,7 @@ impl ExtrinsicCallResult {
     }
   }
 
-  pub fn xthex(&mut self) -> String {
+  pub fn xthex(&self) -> String {
     self.xthex.clone()
   }
 
@@ -929,6 +929,51 @@ impl ExtrinsicCallResult {
         format!("NoBlock")
       }
     }
+  }
+}
+
+#[derive(Clone)]
+pub struct ExtrinsicCallResult(Arc<RwLock<InnerCallResult>>);
+
+impl ExtrinsicCallResult {
+  pub fn new(client: &Client, token: RequestToken, xthex: String) -> Self {
+    Self(Arc::new(RwLock::new(InnerCallResult::new(client, token, xthex))))
+  }
+
+  pub fn is_in_block(&mut self) -> Result<bool, Box<EvalAltResult>> {
+    self.0.write().unwrap().is_in_block()
+  }
+
+  pub fn block_hash(&mut self) -> Result<String, Box<EvalAltResult>> {
+    self.0.write().unwrap().block_hash()
+  }
+
+  pub fn events_filtered(&mut self, prefix: &str) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+    self.0.write().unwrap().events_filtered(prefix)
+  }
+
+  pub fn events(&mut self) -> Result<Vec<Dynamic>, Box<EvalAltResult>> {
+    self.0.write().unwrap().events()
+  }
+
+  pub fn result(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.0.write().unwrap().result()
+  }
+
+  pub fn is_success(&mut self) -> Result<bool, Box<EvalAltResult>> {
+    self.0.write().unwrap().is_success()
+  }
+
+  pub fn block(&mut self) -> Result<Dynamic, Box<EvalAltResult>> {
+    self.0.write().unwrap().block()
+  }
+
+  pub fn xthex(&mut self) -> String {
+    self.0.read().unwrap().xthex()
+  }
+
+  pub fn to_string(&mut self) -> String {
+    self.0.write().unwrap().to_string()
   }
 }
 
@@ -957,6 +1002,7 @@ pub fn init_engine(
         None => Ok(Dynamic::UNIT),
       }
     })
+    .register_fn("get_transaction_version", |client: &mut Client| client.get_transaction_version())
     .register_result_fn("submit_unsigned", Client::submit_unsigned)
     .register_type_with_name::<BlockHash>("BlockHash")
     .register_fn("to_string", |hash: &mut BlockHash| hash.to_string())
