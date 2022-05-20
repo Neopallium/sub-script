@@ -1,3 +1,5 @@
+Moved to [Polymesh Association](https://github.com/PolymeshAssociation/sub-script).
+
 # Sub-script
 
 A simple scripting interface for [Substrate](https://substrate.dev) nodes.
