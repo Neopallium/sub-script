@@ -12,4 +12,4 @@ alice.submit(TestUtils.mock_cdd_register_did(user));
 
 let res = alice.submit(Balances.transfer(user, 5.0));
 print(`call result = ${res}`);
-print(`events = ${res.events()}`);
+print(`events = ${res.events}`);

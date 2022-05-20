@@ -20,7 +20,7 @@ use frame_support::{
 use scale_info::{
   form::PortableForm,
   PortableRegistry,
-  Type, TypeDef, TypeDefPrimitive,
+  TypeDef,
   Variant, Field,
 };
 use parity_scale_codec::{Encode, Output};
@@ -31,6 +31,9 @@ use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map as RMap, INT};
 
 use crate::client::Client;
 use crate::types::{EnumVariants, TypeLookup, TypeMeta, TypeRef};
+
+#[cfg(feature = "v14")]
+use crate::types::{get_type_name, is_type_compact};
 
 #[cfg(any(
 	feature = "v13",
@@ -176,6 +179,9 @@ impl Metadata {
       modules: HashMap::new(),
       idx_map: HashMap::new(),
     };
+
+    // Import types from registry.
+    lookup.import_v14_types(&md.types)?;
 
     // Top-level event/error/call types.
     let mut mod_events = EnumVariants::new();
@@ -608,6 +614,7 @@ impl ModuleMetadata {
       // Module RawError type.
       let mut raw_errors = EnumVariants::new();
 
+      let extra_bytes = lookup.parse_type("[u8; 3]")?;
       let error_ty = types.resolve(error.ty.id())
         .expect("Missing Pallet error type");
       match error_ty.type_def() {
@@ -616,7 +623,7 @@ impl ModuleMetadata {
             |md| -> Result<(), Box<EvalAltResult>> {
               let error = ErrorMetadata::from_v14_meta(&mod_name, mod_idx, md)?;
               let name = error.name.clone();
-              raw_errors.insert_at(error.error_idx, &name, None);
+              raw_errors.insert_at(error.error_idx, &name, Some(extra_bytes.clone()));
               module.err_idx_map.insert(error.error_idx, name.clone());
               module.errors.insert(name, error);
               Ok(())
@@ -722,82 +729,6 @@ pub struct NamedType {
   ty_meta: TypeRef,
 }
 
-#[cfg(feature = "v14")]
-fn is_type_compact(ty: &Type<PortableForm>) -> bool {
-  match ty.type_def() {
-    TypeDef::Compact(_) => true,
-    _ => false,
-  }
-}
-
-#[cfg(feature = "v14")]
-fn get_type_name(ty: &Type<PortableForm>, types: &PortableRegistry) -> String {
-  let name = match ty.type_def() {
-    TypeDef::Sequence(s) => {
-      let elm_ty = types.resolve(s.type_param().id())
-        .expect("Failed to resolve sequence element type");
-      format!("Vec<{}>", get_type_name(elm_ty, types))
-    }
-    TypeDef::Array(a) => {
-      let elm_ty = types.resolve(a.type_param().id())
-        .expect("Failed to resolve array element type");
-      format!("[{}; {}]", get_type_name(elm_ty, types), a.len())
-    }
-    TypeDef::Tuple(t) => {
-      let fields = t.fields().iter().map(|f| {
-        let f_ty = types.resolve(f.id())
-          .expect("Failed to resolve tuple element type");
-        get_type_name(f_ty, types)
-      }).collect::<Vec<_>>();
-      format!("({})", fields.join(","))
-    }
-    TypeDef::Primitive(p) => {
-      use TypeDefPrimitive::*;
-      match p {
-        Bool => "bool".into(),
-        Char => "char".into(),
-        Str => "Text".into(),
-        U8 => "u8".into(),
-        U16 => "u16".into(),
-        U32 => "u32".into(),
-        U64 => "u64".into(),
-        U128 => "u128".into(),
-        U256 => "u256".into(),
-        I8 => "i8".into(),
-        I16 => "i16".into(),
-        I32 => "i32".into(),
-        I64 => "i64".into(),
-        I128 => "i128".into(),
-        I256 => "i256".into(),
-      }
-    }
-    TypeDef::Compact(c) => {
-      let elm_ty = types.resolve(c.type_param().id())
-        .expect("Failed to resolve Compact type");
-      format!("Compact<{}>", get_type_name(elm_ty, types))
-    }
-    _ => {
-      ty.path().ident().expect("Missing type name")
-    }
-  };
-  let ty_params = ty.type_params();
-  if ty_params.len() > 0 {
-    let params = ty_params.iter().map(|p| {
-      match p.ty() {
-        Some(ty) => {
-          let p_ty = types.resolve(ty.id())
-            .expect("Failed to resolve type parameter");
-          get_type_name(p_ty, types)
-        }
-        None => p.name().clone()
-      }
-    }).collect::<Vec<_>>();
-    format!("{}<{}>", name, params.join(","))
-  } else {
-    name
-  }
-}
-
 impl NamedType {
   pub fn new(name: &str, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let ty_meta = lookup.parse_type(name)?;
@@ -813,7 +744,7 @@ impl NamedType {
   pub fn new_type(ty_id: u32, types: &PortableRegistry, lookup: &TypeLookup) -> Result<Self, Box<EvalAltResult>> {
     let ty = types.resolve(ty_id)
       .ok_or_else(|| format!("Failed to resolve type."))?;
-    let name = get_type_name(ty, types);
+    let name = get_type_name(ty, types, false);
     let ty_meta = lookup.parse_type(&name)?;
     let named = Self {
       name: name.into(),
@@ -829,13 +760,20 @@ impl NamedType {
       .ok_or_else(|| format!("Failed to resolve type."))?;
     //let name = get_type_name(ty, types);
     let name = md.type_name().map(|ty_name| {
-        if is_type_compact(ty) {
-          format!("Compact<{}>", ty_name)
+        // Trim junk from `type_name`.
+        let name = if ty_name.starts_with("/*«*/") {
+          let end = ty_name.len() - 6;
+          &ty_name[6..end]
         } else {
-          ty_name.to_string()
+          &ty_name[..]
+        };
+        if is_type_compact(ty) {
+          format!("Compact<{}>", name)
+        } else {
+          name.to_string()
         }
       }).unwrap_or_else(|| {
-        get_type_name(ty, types)
+        get_type_name(ty, types, false)
       });
     let ty_meta = lookup.parse_type(&name)?;
     let named = Self {

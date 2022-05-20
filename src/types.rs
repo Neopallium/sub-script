@@ -8,6 +8,13 @@ use std::sync::{Arc, RwLock};
 use parity_scale_codec::{Compact, Decode, Encode, Error as PError, Input};
 use serde_json::{Map, Value};
 
+#[cfg(feature = "v14")]
+use scale_info::{
+  form::PortableForm,
+  PortableRegistry,
+  Type, TypeDef, TypeDefPrimitive,
+};
+
 use sp_core::crypto::Ss58Codec;
 use sp_runtime::{generic::Era, MultiSignature};
 
@@ -21,6 +28,86 @@ use indexmap::map::IndexMap;
 use super::engine::EngineOptions;
 use super::metadata::EncodedArgs;
 use super::users::{AccountId, SharedUser};
+
+#[cfg(feature = "v14")]
+pub fn is_type_compact(ty: &Type<PortableForm>) -> bool {
+  match ty.type_def() {
+    TypeDef::Compact(_) => true,
+    _ => false,
+  }
+}
+
+#[cfg(feature = "v14")]
+pub fn get_type_name(ty: &Type<PortableForm>, types: &PortableRegistry, full: bool) -> String {
+  let name = match ty.type_def() {
+    TypeDef::Sequence(s) => {
+      let elm_ty = types.resolve(s.type_param().id())
+        .expect("Failed to resolve sequence element type");
+      format!("Vec<{}>", get_type_name(elm_ty, types, full))
+    }
+    TypeDef::Array(a) => {
+      let elm_ty = types.resolve(a.type_param().id())
+        .expect("Failed to resolve array element type");
+      format!("[{}; {}]", get_type_name(elm_ty, types, full), a.len())
+    }
+    TypeDef::Tuple(t) => {
+      let fields = t.fields().iter().map(|f| {
+        let f_ty = types.resolve(f.id())
+          .expect("Failed to resolve tuple element type");
+        get_type_name(f_ty, types, full)
+      }).collect::<Vec<_>>();
+      format!("({})", fields.join(","))
+    }
+    TypeDef::Primitive(p) => {
+      use TypeDefPrimitive::*;
+      match p {
+        Bool => "bool".into(),
+        Char => "char".into(),
+        Str => "Text".into(),
+        U8 => "u8".into(),
+        U16 => "u16".into(),
+        U32 => "u32".into(),
+        U64 => "u64".into(),
+        U128 => "u128".into(),
+        U256 => "u256".into(),
+        I8 => "i8".into(),
+        I16 => "i16".into(),
+        I32 => "i32".into(),
+        I64 => "i64".into(),
+        I128 => "i128".into(),
+        I256 => "i256".into(),
+      }
+    }
+    TypeDef::Compact(c) => {
+      let elm_ty = types.resolve(c.type_param().id())
+        .expect("Failed to resolve Compact type");
+      format!("Compact<{}>", get_type_name(elm_ty, types, full))
+    }
+    _ => {
+      if full {
+        format!("{}", ty.path())
+      } else {
+        ty.path().ident().expect("Missing type name")
+      }
+    }
+  };
+  let ty_params = ty.type_params();
+  if ty_params.len() > 0 {
+    let params = ty_params.iter().map(|p| {
+      match p.ty() {
+        Some(ty) => {
+          let p_ty = types.resolve(ty.id())
+            .expect("Failed to resolve type parameter");
+          get_type_name(p_ty, types, full)
+        }
+        None => p.name().clone()
+      }
+    }).collect::<Vec<_>>();
+    format!("{}<{}>", name, params.join(","))
+  } else {
+    name
+  }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct EnumVariant {
@@ -1030,6 +1117,114 @@ impl Types {
     }
   }
 
+  #[cfg(feature = "v14")]
+  fn import_v14_type(&mut self, id: u32, ty: &Type<PortableForm>, id_to_ref: &HashMap<u32, TypeRef>) -> Result<(), Box<EvalAltResult>> {
+    let type_ref = id_to_ref.get(&id).unwrap();
+    log::debug!("import_v14_type: {}", ty.path());
+    let type_meta = match ty.type_def() {
+      TypeDef::Composite(s) => {
+        let mut fields = IndexMap::new();
+        log::debug!("import_v14_type: Struct({}): fields={:#?}", ty.path(), s.fields());
+        for f in s.fields() {
+          let name = f.name().cloned().unwrap_or_else(|| {
+            format!("unnamed_{}", fields.len())
+          });
+          let field_ty = id_to_ref.get(&f.ty().id())
+            .cloned()
+            .expect("Failed to resolve Composite field type");
+          fields.insert(name.to_string(), field_ty);
+        }
+        TypeMeta::Struct(fields)
+      }
+      TypeDef::Variant(v) => {
+        let mut variants = EnumVariants::new();
+        log::debug!("import_v14_type: Enum({}): variants={:#?}", ty.path(), v.variants());
+        for var in v.variants() {
+          let mut fields = var.fields().into_iter()
+            .map(|ty| id_to_ref.get(&ty.ty().id()).cloned())
+            .collect::<Option<Vec<_>>>()
+            .expect("Failed to resolve Enum variant field type");
+          if fields.len() == 0 {
+            variants.insert_at(var.index(), var.name(), None);
+          } else if fields.len() == 1 {
+            variants.insert_at(var.index(), var.name(), fields.pop());
+          } else {
+            variants.insert_at(var.index(), var.name(), Some(TypeMeta::Tuple(fields).into()));
+          }
+        }
+        TypeMeta::Enum(variants)
+      }
+      TypeDef::Sequence(s) => {
+        let elm_ty = id_to_ref.get(&s.type_param().id())
+          .cloned()
+          .expect("Failed to resolve Sequence element type");
+        TypeMeta::Vector(elm_ty)
+      }
+      TypeDef::Array(a) => {
+        let elm_ty = id_to_ref.get(&a.type_param().id())
+          .cloned()
+          .expect("Failed to resolve Array element type");
+        TypeMeta::Slice(a.len() as usize, elm_ty)
+      }
+      TypeDef::Tuple(t) => {
+        let defs = t.fields().into_iter()
+          .map(|ty| id_to_ref.get(&ty.id()).cloned())
+          .collect::<Option<Vec<_>>>()
+          .expect("Failed to resolve Tuple field type");
+        TypeMeta::Tuple(defs)
+      }
+      TypeDef::Primitive(p) => {
+        use TypeDefPrimitive::*;
+        match p {
+          Bool => TypeMeta::Bool,
+          Char => TypeMeta::Integer(1, false),
+          Str => TypeMeta::String,
+          U8 => TypeMeta::Integer(1, false),
+          U16 => TypeMeta::Integer(2, false),
+          U32 => TypeMeta::Integer(4, false),
+          U64 => TypeMeta::Integer(8, false),
+          U128 => TypeMeta::Integer(16, false),
+          U256 => TypeMeta::Integer(32, false),
+          I8 => TypeMeta::Integer(1, true),
+          I16 => TypeMeta::Integer(2, true),
+          I32 => TypeMeta::Integer(4, true),
+          I64 => TypeMeta::Integer(8, true),
+          I128 => TypeMeta::Integer(16, true),
+          I256 => TypeMeta::Integer(32, true),
+        }
+      }
+      TypeDef::Compact(c) => {
+        let elm_ty = id_to_ref.get(&c.type_param().id())
+          .cloned()
+          .expect("Failed to resolve Compact type");
+        TypeMeta::Compact(elm_ty)
+      }
+      _ => {
+        todo!("Handle TypeDef");
+      }
+    };
+    // Resolve type.
+    let mut old_meta = type_ref.0.write().unwrap();
+    *old_meta = type_meta;
+    Ok(())
+  }
+
+  #[cfg(feature = "v14")]
+  pub fn import_v14_types(&mut self, types: &PortableRegistry) -> Result<(), Box<EvalAltResult>> {
+    let mut id_to_ref = HashMap::new();
+    for ty in types.types() {
+      let name = get_type_name(ty.ty(), types, true);
+      log::debug!("import_v14_type: {:?} => {}", ty.id(), name);
+      let type_ref = self.resolve(&name);
+      id_to_ref.insert(ty.id(), type_ref);
+    }
+
+    for ty in types.types() {
+      self.import_v14_type(ty.id(), ty.ty(), &id_to_ref)?;
+    }
+    Ok(())
+  }
+
   /// Dump types.
   pub fn dump_types(&self) {
     for (idx, (key, type_ref)) in self.types.iter().enumerate() {
@@ -1117,6 +1312,12 @@ impl TypeLookup {
   pub fn insert(&self, name: &str, type_def: TypeRef) -> TypeRef {
     let mut t = self.types.write().unwrap();
     t.insert(name, type_def)
+  }
+
+  #[cfg(feature = "v14")]
+  pub fn import_v14_types(&self, types: &PortableRegistry) -> Result<(), Box<EvalAltResult>> {
+    let mut t = self.types.write().unwrap();
+    t.import_v14_types(types)
   }
 
   pub fn dump_types(&mut self) {
