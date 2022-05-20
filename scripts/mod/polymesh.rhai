@@ -55,15 +55,42 @@ fn get_balances(users) {
 	});
 }
 
+const TX_VERSION = CLIENT.get_transaction_version();
+
+fn key_records_did(rec) {
+	if rec == () {
+		return ();
+	}
+	let p_key = rec.PrimaryKey;
+	if p_key != () {
+		return p_key;
+	}
+	let s_key = rec.SecondaryKey;
+	if s_key != () {
+		return s_key[0];
+	}
+	return ();
+}
+
 // get user's identity id.
 fn get_did(user) {
-	return STORAGE.map("Identity", "KeyToIdentityIds", user.acc);
+	if global::TX_VERSION < 3 {
+		return STORAGE.map("Identity", "KeyToIdentityIds", user.acc);
+	} else {
+		let rec = STORAGE.map("Identity", "KeyRecords", user.acc);
+		return key_records_did(rec);
+	}
 }
 
 // get multiple user's identity id.
 fn get_dids(users) {
 	let accounts = get_accounts(users);
-	return STORAGE.map_keys("Identity", "KeyToIdentityIds", accounts);
+	if global::TX_VERSION < 3 {
+		return STORAGE.map_keys("Identity", "KeyToIdentityIds", accounts);
+	} else {
+		return STORAGE.map_keys("Identity", "KeyRecords", accounts)
+			.map(|rec| key_records_did(rec));
+	}
 }
 
 // Mock CDD for user and make sure they have POLYX.
